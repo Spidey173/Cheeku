@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>CHEEKU // Neural Operating System</title>
+    
+    <!-- Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Three.js + PostProcessing CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    
+    <!-- GSAP for timeline choreographies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+    <link rel="stylesheet" href="/static/style.css?v=4.1">
+</head>
+<body class="state-idle">
+    <!-- 3D WebGL Canvas Layer -->
+    <canvas id="webgl-canvas"></canvas>
+
+
+    <!-- Iron Man Boot Sequence Overlay -->
+    <div id="boot-overlay" class="boot-overlay">
+        <div class="boot-spark" id="boot-spark"></div>
+        <div class="boot-shockwave" id="boot-shockwave"></div>
+        <div class="boot-loader">
+            <div class="boot-title">CHEEKU OS</div>
+            <div class="boot-sub" id="boot-status">SYNAPSE INITIALIZATION</div>
+            <div class="boot-bar"><div class="boot-progress" id="boot-bar-fill"></div></div>
+        </div>
+    </div>
+
+    <!-- HUD Chrome Overlay -->
+    <div class="hud-layer">
+        <!-- Top Status Bar -->
+        <header class="hud-top">
+            <div class="hud-brand">
+                <div class="brand-beacon">
+                    <span class="beacon-core"></span>
+                    <span class="beacon-halo"></span>
+                </div>
+                <div class="brand-meta">
+                    <h1 class="brand-title">CHEEKU</h1>
+                </div>
+            </div>
+
+            <div class="hud-metrics">
+                <div class="metric-badge" title="Host CPU Vitals">
+                    <span class="metric-label">CPU</span>
+                    <span class="metric-val" id="tel-cpu">--%</span>
+                </div>
+                <div class="metric-badge" title="Host RAM Memory Vitals">
+                    <span class="metric-label">RAM</span>
+                    <span class="metric-val" id="tel-ram">-- GB</span>
+                </div>
+                <div class="hud-telemetry-pill" id="state-pill">
+                    <span class="state-dot"></span>
+                    <span class="state-label" id="state-text">INITIALIZING</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Refined Mature Live Voice Transcription Pill (Apple/VisionOS aesthetic) -->
+        <div id="transcript-bar" class="transcript-bar hidden">
+            <span class="transcript-dot"></span>
+            <span class="transcript-text" id="live-transcript-text">Listening...</span>
+        </div>
+
+        <!-- 3D AI Core Interactive Hit Zone (Zero artificial rings, direct fluid interaction) -->
+        <div class="core-trigger-anchor" id="core-trigger" role="button" aria-label="Engage Cheeku Neural Core">
+            <div class="trigger-icon">
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="22"/>
+                </svg>
+            </div>
+            <div class="trigger-hint" id="trigger-hint">PRESS SPACEBAR OR TAP TO SPEAK</div>
+        </div>
+
+        <!-- Holographic Action HUD (Displayed during Tool / System Actions) -->
+        <div id="action-hud" class="action-hud hidden">
+            <div class="action-card">
+                <div class="action-header">
+                    <div class="action-badge" id="action-icon">🎵</div>
+                    <div class="action-meta">
+                        <span class="action-type" id="action-type">SYSTEM DIRECTIVE</span>
+                        <h2 class="action-title" id="action-title">DISPATCHING YOUTUBE</h2>
+                    </div>
+                </div>
+                <div class="action-body">
+                    <p class="action-detail" id="action-detail">"Dheere Dheere Yo Yo Honey Singh"</p>
+                    <div class="action-progress-track">
+                        <div class="action-progress-fill" id="action-progress"></div>
+                    </div>
+                </div>
+                <div class="action-footer">
+                    <span class="action-status-tag" id="action-status-tag">ACTIVE TRANSMISSION</span>
+                    <span class="action-latency">0.08ms</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Holographic Response Floater (Appears smoothly, floats, distorts into space) -->
+        <div id="holo-speech-floater" class="holo-speech-floater hidden">
+            <div class="floater-bracket bl-bracket"></div>
+            <div class="floater-bracket br-bracket"></div>
+            <div class="floater-content">
+                <div class="floater-meta">
+                    <span class="floater-sender">CHEEKU // SYNAPSE</span>
+                    <span class="floater-audio-wave">
+                        <span></span><span></span><span></span><span></span><span></span>
+                    </span>
+                </div>
+                <div class="floater-text" id="holo-response-text">I am listening. Speak your mind.</div>
+            </div>
+        </div>
+
+        <!-- Bottom HUD: Centered Interactive Command Dock -->
+        <footer class="hud-bottom">
+            <!-- Cyber-Glassmorphic HUD Command & Chat Dock -->
+            <div class="hud-chat-dock" id="hud-chat-dock">
+                <form id="chat-form" class="chat-form" onsubmit="event.preventDefault();">
+                    <button type="button" id="mic-dock-btn" class="chat-dock-btn mic-btn" aria-label="Toggle Voice Input" title="Voice Input (Spacebar)">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="22"/>
+                        </svg>
+                    </button>
+                    <button type="button" id="voice-test-btn" class="chat-dock-btn voice-btn" aria-label="Test Voice" title="Test Voice Output">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                        </svg>
+                    </button>
+                    <input 
+                        type="text" 
+                        id="chat-input" 
+                        class="chat-input" 
+                        placeholder="Talk or command Cheeku... (e.g. 'play songs on youtube')" 
+                        autocomplete="off" 
+                        spellcheck="false"
+                    />
+                    <button type="submit" id="send-dock-btn" class="chat-dock-btn send-btn" aria-label="Send Directive" title="Send Directive">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+
+            <div class="waveform-meter">
+                <div class="eq-bars" id="eq-bars">
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Hidden Audio Player for Speech Synthesis playback -->
+    <audio id="tts-audio-player" style="display:none;"></audio>
+
+    <script src="/static/app.js?v=4.2"></script>
+</body>
+</html>
