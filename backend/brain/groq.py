@@ -1,3 +1,4 @@
+import asyncio
 import json
 import httpx
 from typing import List, Dict, Any, Optional
@@ -11,8 +12,8 @@ from backend.utils.logger import logger
 
 class GroqBrainClient:
     """
-    Ultra-fast Cloud Neural Brain powered by Groq LPU (qwen/qwen3.8-27b).
-    Provides sub-second conversational latency, sweet personality, and autonomous tool calling.
+    Cloud Neural Brain powered by Groq LPU.
+    Provides fast conversational reasoning and tool calling.
     """
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or settings.GROQ_API_KEY
@@ -21,15 +22,18 @@ class GroqBrainClient:
 
     @property
     def headers(self) -> Dict[str, str]:
+        key = self.api_key or settings.GROQ_API_KEY
         return {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json"
         }
 
     async def is_online(self) -> bool:
         """Verifies Groq API connectivity and authentication."""
+        if not (self.api_key or settings.GROQ_API_KEY):
+            return False
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with httpx.AsyncClient(timeout=4.0) as client:
                 res = await client.get(f"{self.base_url}/models", headers=self.headers)
                 return res.status_code == 200
         except Exception as e:
@@ -38,15 +42,17 @@ class GroqBrainClient:
 
     async def generate_response(
         self,
-        messages: List[ChatMessage]
+        messages: List[ChatMessage],
+        user_name: Optional[str] = None,
+        context_notes: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Sends dialogue history and tool definitions to Groq chat completions.
         Returns generated content and any requested tool calls.
         """
-        user_name = memory.get_pref("user_name")
-        context_notes = memory.get_context_summary()
-        sys_prompt = get_system_prompt(user_name, context_notes)
+        current_user = user_name or memory.get_pref("user_name")
+        current_context = context_notes if context_notes is not None else memory.get_context_summary()
+        sys_prompt = get_system_prompt(current_user, current_context)
 
         # Build message history for OpenAI-compatible endpoint
         api_messages = [{"role": "system", "content": sys_prompt}]
@@ -93,14 +99,14 @@ class GroqBrainClient:
                         "success": True
                     }
                 else:
-                    logger.error(f"Groq API returned error status {res.status_code}: {res.text}")
+                    logger.error(f"Groq API returned HTTP status {res.status_code}")
                     return {
-                        "content": f"Groq API error ({res.status_code}). Please check API settings.",
+                        "content": f"Groq API error (status {res.status_code}). Please verify GROQ_API_KEY.",
                         "tool_calls": [],
                         "success": False
                     }
 
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, asyncio.TimeoutError):
             logger.error("Groq API request timed out.")
             return {
                 "content": "My thoughts took a moment too long! I am still right here with you.",
@@ -110,7 +116,7 @@ class GroqBrainClient:
         except Exception as e:
             logger.error(f"Groq chat execution error: {e}", exc_info=True)
             return {
-                "content": f"I had a slight neural hiccup: {str(e)}",
+                "content": "I had a slight neural hiccup processing that request.",
                 "tool_calls": [],
                 "success": False
             }

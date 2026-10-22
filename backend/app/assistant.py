@@ -1,7 +1,8 @@
 import asyncio
 import json
 import time
-from typing import Optional, Dict, Set, Any
+from typing import Optional, Dict, Set, Any, List
+from fastapi import WebSocket
 from backend.models.schemas import AssistantState, ChatMessage, MessageRole
 from backend.brain.groq import groq_client
 from backend.brain.memory import memory
@@ -10,6 +11,7 @@ from backend.tools.registry import registry
 from backend.audio.stt import stt
 from backend.audio.tts import tts
 from backend.app.websocket import ws_manager
+from backend.app.config import settings
 from backend.utils.logger import logger
 
 # Deterministic Finite State Machine Transition Matrix
@@ -70,50 +72,75 @@ ALLOWED_TRANSITIONS: Dict[AssistantState, Set[AssistantState]] = {
 
 class AssistantOrchestrator:
     """
-    Central Controller for Cheeku AI Voice OS Assistant.
-    Coordinates Deterministic State Machine, Task Cancellation, Groq Cloud Brain, Tools, and Audio.
+    Controller for Cheeku AI Voice OS Assistant session.
+    Coordinates Deterministic State Machine, Task Cancellation, Groq Brain, Tools, and Audio per session.
     """
-    def __init__(self):
+    def __init__(self, session_id: str = "default", websocket: Optional[WebSocket] = None):
+        self.session_id: str = session_id
+        self.websocket: Optional[WebSocket] = websocket
         self.state: AssistantState = AssistantState.BOOTING
         self.is_processing: bool = False
         self._current_task: Optional[asyncio.Task] = None
         self._timeout_task: Optional[asyncio.Task] = None
         self._last_state_time: float = time.time()
         self._state_lock: asyncio.Lock = asyncio.Lock()
+        self.short_term_history: List[ChatMessage] = []
 
     def can_transition(self, target: AssistantState) -> bool:
         """Checks if moving from current state to target state is legally permitted by FSM."""
         return target in ALLOWED_TRANSITIONS.get(self.state, set())
 
     async def initialize(self):
-        """Bootstraps subsystems, validates Groq neural brain, and transitions to READY."""
-        logger.info("Cheeku Orchestrator booting up with Groq Neural Brain...")
+        """Bootstraps subsystems, checks Groq brain, and transitions to READY."""
+        logger.info(f"Orchestrator [{self.session_id}] booting up...")
         await self.set_state(AssistantState.BOOTING, "Connecting to Groq Neural Brain...", force=True)
 
-        # Check Groq status
         groq_ok = await groq_client.is_online()
         if groq_ok:
-            logger.info("Groq Cloud Brain (qwen/qwen3.8-27b) is ONLINE.")
+            logger.info("Groq Cloud Brain is ONLINE.")
         else:
-            logger.warning("Groq API connection issue. Please check GROQ_API_KEY in .env.")
+            logger.warning("Groq API connection check failed. Verify GROQ_API_KEY in .env.")
 
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.1)
         await self.set_state(AssistantState.READY, "Cheeku is ready and listening! 💖")
+
+    def add_history(
+        self,
+        role: MessageRole,
+        content: str,
+        tool_call_id: Optional[str] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        name: Optional[str] = None
+    ):
+        """Adds a message to this session's isolated short-term memory."""
+        msg = ChatMessage(
+            role=role,
+            content=content or "",
+            tool_call_id=tool_call_id,
+            tool_calls=tool_calls,
+            name=name,
+            timestamp=time.time()
+        )
+        self.short_term_history.append(msg)
+        if len(self.short_term_history) > settings.MAX_HISTORY_TURNS * 2:
+            self.short_term_history = self.short_term_history[-settings.MAX_HISTORY_TURNS * 2:]
+
+        # Also persist to global database log
+        memory.add_short_term(role, content, tool_call_id, tool_calls, name)
 
     async def set_state(self, new_state: AssistantState, details: str = "", force: bool = False) -> bool:
         """
-        Enforces deterministic state transitions with audit logging and frontend telemetry.
+        Enforces deterministic state transitions with audit logging and targeted telemetry.
         Returns True if transition occurred, False if rejected by FSM.
         """
         async with self._state_lock:
             if self.state == new_state:
-                # Same state update (refresh details)
-                await ws_manager.send_state(new_state, details)
+                await ws_manager.send_state_to(self.websocket, new_state, details)
                 return True
 
             if not force and not self.can_transition(new_state):
                 logger.warning(
-                    f"Blocked invalid FSM transition: [{self.state.value}] -> [{new_state.value}] | details: '{details}'"
+                    f"[{self.session_id}] Blocked invalid FSM transition: [{self.state.value}] -> [{new_state.value}] | details: '{details}'"
                 )
                 return False
 
@@ -125,9 +152,9 @@ class AssistantOrchestrator:
             self._last_state_time = now
 
             logger.info(
-                f"FSM Transition: [{old_state.value}] -> [{new_state.value}] (stayed {duration:.2f}s) | details: {details}"
+                f"[{self.session_id}] FSM Transition: [{old_state.value}] -> [{new_state.value}] (stayed {duration:.2f}s) | details: {details}"
             )
-            await ws_manager.send_state(new_state, details)
+            await ws_manager.send_state_to(self.websocket, new_state, details)
             return True
 
     async def interrupt(self, reason: str = "User interruption"):
@@ -135,25 +162,43 @@ class AssistantOrchestrator:
         Cancels any in-flight LLM request, tool execution, or audio synthesis task cleanly.
         Enables instantaneous voice barge-in without orphaned tasks or state drift.
         """
-        logger.info(f"Interrupting active orchestrator pipeline: reason='{reason}'")
+        logger.info(f"[{self.session_id}] Interrupting active pipeline: reason='{reason}'")
 
-        # Cancel pending speech timeout if any
         if self._timeout_task and not self._timeout_task.done():
             self._timeout_task.cancel()
             self._timeout_task = None
 
-        # Cancel active turn execution task
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
             try:
-                # Wait briefly for cancellation to propagate cleanly
                 await asyncio.wait_for(asyncio.shield(self._current_task), timeout=0.3)
             except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
                 pass
             self._current_task = None
 
         self.is_processing = False
-        await ws_manager.send_interrupt(reason)
+        await ws_manager.send_interrupt_to(self.websocket, reason)
+
+    async def shutdown(self):
+        """Awaits and cleans up all active tasks for this session during shutdown or disconnect."""
+        logger.info(f"[{self.session_id}] Shutting down session orchestrator...")
+        if self._timeout_task and not self._timeout_task.done():
+            self._timeout_task.cancel()
+            try:
+                await self._timeout_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._timeout_task = None
+
+        if self._current_task and not self._current_task.done():
+            self._current_task.cancel()
+            try:
+                await self._current_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._current_task = None
+
+        self.is_processing = False
 
     async def handle_user_input(self, user_text: str):
         """
@@ -166,10 +211,9 @@ class AssistantOrchestrator:
 
         # Barge-in: If a turn is already executing, cancel it cleanly
         if self.is_processing or (self._current_task and not self._current_task.done()):
-            logger.info("Barge-in detected: interrupting in-flight turn for incoming user input.")
+            logger.info(f"[{self.session_id}] Barge-in detected: interrupting in-flight turn for incoming user input.")
             await self.interrupt("Barge-in on new user input")
 
-        # Cancel any lingering speech timeout
         if self._timeout_task and not self._timeout_task.done():
             self._timeout_task.cancel()
             self._timeout_task = None
@@ -179,7 +223,7 @@ class AssistantOrchestrator:
         try:
             await self._current_task
         except asyncio.CancelledError:
-            logger.info("Active turn task cancelled cleanly during execution.")
+            logger.info(f"[{self.session_id}] Active turn task cancelled cleanly during execution.")
         finally:
             if self._current_task and self._current_task.done():
                 self._current_task = None
@@ -191,22 +235,22 @@ class AssistantOrchestrator:
         """
         self.is_processing = True
         try:
-            # 1. Register User Message
-            memory.add_short_term(MessageRole.USER, user_text)
-            await ws_manager.send_chat("user", user_text)
+            # 1. Register User Message in session history
+            self.add_history(MessageRole.USER, user_text)
+            await ws_manager.send_chat_to(self.websocket, "user", user_text)
 
             # 2. State: THINKING
             await self.set_state(AssistantState.THINKING, "Consulting Groq Neural Brain...")
 
-            # 3. Call Brain (Groq qwen/qwen3.8-27b)
-            response = await groq_client.generate_response(memory.get_short_term())
+            # 3. Call Brain (Groq qwen/qwen3.8-27b) using session history
+            response = await groq_client.generate_response(self.short_term_history)
 
             tool_calls = response.get("tool_calls", [])
             reply_text = response.get("content", "")
 
             # 4. Handle Tool Calls
             if tool_calls:
-                memory.add_short_term(
+                self.add_history(
                     MessageRole.ASSISTANT,
                     reply_text or "",
                     tool_calls=tool_calls
@@ -234,7 +278,7 @@ class AssistantOrchestrator:
                         "save_quick_note": "Writing to Neural Memory",
                         "launch_application": "Launching Application",
                         "open_website": "Opening Web Target"
-                    }.get(fn_name, fn_name.replace("_", " ").title())
+                    }.get(fn_name, (fn_name or "Tool").replace("_", " ").title())
 
                     detail = (
                         fn_args.get("query")
@@ -244,29 +288,31 @@ class AssistantOrchestrator:
                         or ""
                     )
 
-                    await ws_manager.send_tool_call(
+                    await ws_manager.send_tool_call_to(
+                        self.websocket,
                         fn_name,
                         {"args": fn_args, "title": label, "detail": detail, "status": "active"}
                     )
 
                     # Execute tool safely
                     tool_output = await registry.execute(fn_name, fn_args)
-                    await ws_manager.send_tool_result(
+                    await ws_manager.send_tool_result_to(
+                        self.websocket,
                         fn_name,
                         json.dumps({"output": str(tool_output), "title": label, "detail": detail, "status": "done"})
                     )
 
-                    # Feed tool result back to memory
-                    memory.add_short_term(
+                    # Feed tool result back to session history
+                    self.add_history(
                         MessageRole.TOOL,
                         str(tool_output),
                         tool_call_id=call_id,
                         name=fn_name
                     )
 
-                # Formulate natural conversational voice response from tool results
+                # Formulate natural conversational reply from tool results
                 await self.set_state(AssistantState.GENERATING, "Formulating voice reply...")
-                followup = await groq_client.generate_response(memory.get_short_term())
+                followup = await groq_client.generate_response(self.short_term_history)
                 reply_text = followup.get("content", reply_text)
 
             # Clean reply if it's empty
@@ -275,9 +321,9 @@ class AssistantOrchestrator:
             elif not reply_text.strip():
                 reply_text = "I'm right here listening!"
 
-            # 5. Save assistant reply and broadcast to frontend
-            memory.add_short_term(MessageRole.ASSISTANT, reply_text)
-            await ws_manager.send_chat("assistant", reply_text)
+            # 5. Save assistant reply and broadcast to client
+            self.add_history(MessageRole.ASSISTANT, reply_text)
+            await ws_manager.send_chat_to(self.websocket, "assistant", reply_text)
 
             # 6. State: GENERATING (during TTS synthesis)
             await self.set_state(AssistantState.GENERATING, "Synthesizing voice reply...")
@@ -291,14 +337,15 @@ class AssistantOrchestrator:
             # 7. State: SPEAKING (only active when audio is transmitted to browser)
             if audio_res:
                 await self.set_state(AssistantState.SPEAKING, "Cheeku is speaking...")
-                await ws_manager.send_audio(
+                await ws_manager.send_audio_to(
+                    self.websocket,
                     audio_res["data"],
                     mime_type=audio_res.get("mime", "audio/mp3")
                 )
             else:
                 logger.warning("Neural TTS synthesis produced no audio. Broadcasting fallback signal.")
                 await self.set_state(AssistantState.SPEAKING, "Cheeku is speaking...")
-                await ws_manager.send_audio_failed(reply_text)
+                await ws_manager.send_audio_failed_to(self.websocket, reply_text)
 
             # Watchdog timeout: primary READY transition is triggered by browser onended event
             word_count = len(reply_text.split())
@@ -308,13 +355,13 @@ class AssistantOrchestrator:
             self._timeout_task = asyncio.create_task(self._auto_ready_timeout(speech_duration))
 
         except asyncio.CancelledError:
-            logger.info("Pipeline processing turn was cancelled.")
+            logger.info(f"[{self.session_id}] Pipeline processing turn was cancelled.")
             raise
         except Exception as e:
-            logger.error(f"Error in orchestrator loop: {e}", exc_info=True)
+            logger.error(f"[{self.session_id}] Error in orchestrator loop: {e}", exc_info=True)
             await self.set_state(AssistantState.ERROR, str(e))
-            await ws_manager.send_chat("assistant", "Oh dear, I had a little hiccup! But I'm still here for you!")
-            await asyncio.sleep(2.0)
+            await ws_manager.send_chat_to(self.websocket, "assistant", "Oh dear, I had a little hiccup! But I'm still here for you!")
+            await asyncio.sleep(1.0)
             await self.set_state(AssistantState.READY, "Cheeku is ready!", force=True)
         finally:
             self.is_processing = False
@@ -334,13 +381,45 @@ class AssistantOrchestrator:
             await self.interrupt("Barge-in on audio stream")
 
         await self.set_state(AssistantState.TRANSCRIBING, "Transcribing speech with Whisper...")
-        text = stt.transcribe_bytes(audio_bytes)
+        text = await stt.transcribe_bytes_async(audio_bytes)
         if text:
-            logger.info(f"Transcribed audio: '{text}'")
+            logger.info(f"[{self.session_id}] Transcribed audio: '{text}'")
             await self.handle_user_input(text)
         else:
-            logger.info("No audible speech detected in audio stream.")
+            logger.info(f"[{self.session_id}] No audible speech detected in audio stream.")
             await self.set_state(AssistantState.READY, "Cheeku is ready!")
 
 
+class SessionRegistry:
+    """Manages active assistant orchestrator sessions."""
+    def __init__(self):
+        self._sessions: Dict[str, AssistantOrchestrator] = {}
+        self._lock = asyncio.Lock()
+
+    def get_or_create(self, session_id: str, websocket: Optional[WebSocket] = None) -> AssistantOrchestrator:
+        if session_id not in self._sessions:
+            orch = AssistantOrchestrator(session_id=session_id, websocket=websocket)
+            orch.state = AssistantState.READY
+            self._sessions[session_id] = orch
+        else:
+            if websocket is not None:
+                self._sessions[session_id].websocket = websocket
+        return self._sessions[session_id]
+
+    async def remove_session(self, session_id: str):
+        orch = self._sessions.pop(session_id, None)
+        if orch:
+            await orch.shutdown()
+
+    async def shutdown_all(self):
+        tasks = [orch.shutdown() for orch in list(self._sessions.values())]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._sessions.clear()
+
+    def count(self) -> int:
+        return len(self._sessions)
+
+
+session_registry = SessionRegistry()
 orchestrator = AssistantOrchestrator()

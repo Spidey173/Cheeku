@@ -7,6 +7,7 @@ from backend.app.config import settings
 from backend.models.schemas import ChatMessage, MessageRole
 from backend.utils.logger import logger
 
+
 class MemoryManager:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.path.join(settings.DATA_DIR, "cheeku_memory.db")
@@ -17,7 +18,6 @@ class MemoryManager:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                # Long-term Key-Value memory (preferences, profile, favorites)
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS kv_memory (
                         key TEXT PRIMARY KEY,
@@ -26,7 +26,6 @@ class MemoryManager:
                         updated_at REAL NOT NULL
                     )
                 """)
-                # Conversation Log
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS conversation_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +34,6 @@ class MemoryManager:
                         timestamp REAL NOT NULL
                     )
                 """)
-                # Quick Notes & Tasks
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS notes (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,8 +68,7 @@ class MemoryManager:
         )
         if len(self.short_term_history) > settings.MAX_HISTORY_TURNS * 2:
             self.short_term_history = self.short_term_history[-settings.MAX_HISTORY_TURNS * 2:]
-        
-        # Also persist to SQLite
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
@@ -83,7 +80,7 @@ class MemoryManager:
             logger.error(f"Error saving to long-term conversation log: {e}")
 
     def get_short_term(self) -> List[ChatMessage]:
-        return self.short_term_history
+        return list(self.short_term_history)
 
     def clear_short_term(self):
         self.short_term_history.clear()
@@ -99,7 +96,7 @@ class MemoryManager:
                     ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
                 """, (key, val_str, category, time.time()))
                 conn.commit()
-            logger.info(f"Memory updated: [{category}] {key} = {value}")
+            logger.info(f"Memory updated: category='{category}', key='{key}'")
         except Exception as e:
             logger.error(f"Error writing to kv_memory: {e}")
 
@@ -112,7 +109,7 @@ class MemoryManager:
                 if row:
                     try:
                         return json.loads(row[0])
-                    except:
+                    except Exception:
                         return row[0]
         except Exception as e:
             logger.error(f"Error reading kv_memory: {e}")
@@ -127,7 +124,7 @@ class MemoryManager:
                 for k, v in cursor.fetchall():
                     try:
                         prefs[k] = json.loads(v)
-                    except:
+                    except Exception:
                         prefs[k] = v
         except Exception as e:
             logger.error(f"Error fetching all prefs: {e}")
@@ -158,5 +155,6 @@ class MemoryManager:
             for nid, content, cat, ts in cursor.fetchall():
                 notes.append({"id": nid, "content": content, "category": cat, "created_at": ts})
         return notes
+
 
 memory = MemoryManager()

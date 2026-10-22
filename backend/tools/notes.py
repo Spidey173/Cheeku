@@ -1,5 +1,9 @@
+import re
 from backend.tools.registry import register_tool
 from backend.brain.memory import memory
+
+SAFE_KEY_REGEX = re.compile(r"^[a-zA-Z0-9_\-]{1,50}$")
+
 
 @register_tool(
     name="save_quick_note",
@@ -18,11 +22,20 @@ from backend.brain.memory import memory
             }
         },
         "required": ["content"]
-    }
+    },
+    requires_system_action=False
 )
-def save_quick_note(content: str, category: str = "note"):
-    note_id = memory.add_note(content, category)
-    return f"I saved your note: '{content}' (Note #{note_id})!"
+def save_quick_note(content: str, category: str = "note") -> str:
+    if not isinstance(content, str) or not content.strip():
+        return "Error: Note content must be a non-empty string."
+
+    clean_content = content.strip()[:5000]
+    clean_cat = str(category).strip()[:50] or "note"
+    clean_cat = re.sub(r"[^a-zA-Z0-9_\-]", "", clean_cat) or "note"
+
+    note_id = memory.add_note(clean_content, clean_cat)
+    return f"I saved your note: '{clean_content}' (Note #{note_id})!"
+
 
 @register_tool(
     name="remember_user_preference",
@@ -40,8 +53,22 @@ def save_quick_note(content: str, category: str = "note"):
             }
         },
         "required": ["key", "value"]
-    }
+    },
+    requires_system_action=False
 )
-def remember_user_preference(key: str, value: str):
-    memory.set_pref(key, value)
-    return f"Got it! I will always remember that your {key.replace('_', ' ')} is '{value}'! 💖"
+def remember_user_preference(key: str, value: str) -> str:
+    if not isinstance(key, str) or not key.strip():
+        return "Error: Preference key must be a non-empty string."
+
+    clean_key = key.strip().lower()
+    if not SAFE_KEY_REGEX.match(clean_key):
+        return f"Error: Invalid preference key '{key}'. Must be alphanumeric with underscores."
+
+    if not isinstance(value, str):
+        val_str = str(value)
+    else:
+        val_str = value.strip()
+
+    clean_val = val_str[:1000]
+    memory.set_pref(clean_key, clean_val)
+    return f"Got it! I will remember that your {clean_key.replace('_', ' ')} is '{clean_val}'! 💖"

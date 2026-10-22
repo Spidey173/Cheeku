@@ -823,14 +823,22 @@ class CheekuOS {
     /* ==========================================================================
        WEBSOCKET BRIDGE
        ========================================================================== */
-    connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = urlParams.get('token') || localStorage.getItem('cheeku_auth_token');
+        if (!this.sessionId) {
+            this.sessionId = urlParams.get('session_id') || 'sess_' + Math.random().toString(36).substring(2, 11);
+        }
+
+        let wsUrl = `${protocol}//${window.location.host}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
+        if (token) {
+            wsUrl += `&token=${encodeURIComponent(token)}`;
+        }
 
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-            console.log('Cheeku Neural WebSocket Connected.');
+            console.log('Cheeku Neural WebSocket Connected (Session: ' + this.sessionId + ').');
         };
 
         this.ws.onmessage = (event) => {
@@ -907,6 +915,13 @@ class CheekuOS {
 
             case 'telemetry':
                 this.updateTelemetry(msg.payload);
+                break;
+
+            case 'error':
+                console.warn('Cheeku Core notice:', msg.payload?.message);
+                if (msg.payload && msg.payload.message) {
+                    this.setHint(`⚠️ ${msg.payload.message}`);
+                }
                 break;
         }
     }
