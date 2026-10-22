@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 from typing import Any, List, Optional
 from dotenv import load_dotenv
@@ -32,6 +33,37 @@ def _parse_list(val: Any, default: List[str]) -> List[str]:
     return default
 
 
+def _resolve_default_auth_token() -> Optional[str]:
+    """
+    Resolves or generates a secure auth token.
+    Ensures safe-by-default posture: authentication is never absent unless explicitly opted out.
+    """
+    configured_token = os.getenv("AUTH_TOKEN", "").strip()
+    if configured_token:
+        return configured_token
+
+    if _parse_bool(os.getenv("ALLOW_UNAUTHENTICATED", "false"), default=False):
+        return None
+
+    # Auto-generate a secure token for local server lifecycle
+    token_file = BASE_DIR / ".cheeku_token"
+    if token_file.exists():
+        try:
+            stored = token_file.read_text().strip()
+            if stored:
+                return stored
+        except Exception:
+            pass
+
+    new_token = secrets.token_urlsafe(24)
+    try:
+        token_file.write_text(new_token)
+        os.chmod(token_file, 0o600)
+    except Exception:
+        pass
+    return new_token
+
+
 class Settings(BaseModel):
     # App Settings
     APP_NAME: str = "Cheeku AI Assistant"
@@ -39,9 +71,10 @@ class Settings(BaseModel):
     PORT: int = int(os.getenv("PORT", 8000))
     DEBUG: bool = _parse_bool(os.getenv("DEBUG", "false"), default=False)
 
-    # Security & WebSocket
-    AUTH_TOKEN: Optional[str] = os.getenv("AUTH_TOKEN", "").strip() or None
-    WS_AUTH_REQUIRED: bool = _parse_bool(os.getenv("WS_AUTH_REQUIRED", "false"), default=False)
+    # Security & WebSocket (Secure by Default)
+    AUTH_TOKEN: Optional[str] = Field(default_factory=_resolve_default_auth_token)
+    WS_AUTH_REQUIRED: bool = _parse_bool(os.getenv("WS_AUTH_REQUIRED", "true"), default=True)
+    ALLOW_UNAUTHENTICATED: bool = _parse_bool(os.getenv("ALLOW_UNAUTHENTICATED", "false"), default=False)
     ALLOWED_ORIGINS: List[str] = Field(
         default_factory=lambda: _parse_list(
             os.getenv("ALLOWED_ORIGINS"),
@@ -51,8 +84,8 @@ class Settings(BaseModel):
     ALLOW_ALL_ORIGINS: bool = _parse_bool(os.getenv("ALLOW_ALL_ORIGINS", "false"), default=False)
     MAX_PAYLOAD_BYTES: int = int(os.getenv("MAX_PAYLOAD_BYTES", 1_048_576))  # 1 MB default frame limit
 
-    # Tool Execution Security & Authorization
-    ENABLE_SYSTEM_ACTIONS: bool = _parse_bool(os.getenv("ENABLE_SYSTEM_ACTIONS", "true"), default=True)
+    # Tool Execution Security & Authorization (Disabled by Default for safety)
+    ENABLE_SYSTEM_ACTIONS: bool = _parse_bool(os.getenv("ENABLE_SYSTEM_ACTIONS", "false"), default=False)
     ALLOWED_SYSTEM_APPS: List[str] = Field(
         default_factory=lambda: _parse_list(
             os.getenv("ALLOWED_SYSTEM_APPS"),

@@ -20,7 +20,8 @@ from backend.app.config import settings
 def open_browser():
     time.sleep(1.2)
     display_host = "localhost" if settings.HOST in ("0.0.0.0", "127.0.0.1") else settings.HOST
-    url = f"http://{display_host}:{settings.PORT}"
+    token_query = f"?token={settings.AUTH_TOKEN}" if settings.AUTH_TOKEN else ""
+    url = f"http://{display_host}:{settings.PORT}/{token_query}"
     try:
         webbrowser.open(url)
     except Exception:
@@ -28,7 +29,8 @@ def open_browser():
 
 if __name__ == "__main__":
     display_host = "localhost" if settings.HOST in ("0.0.0.0", "127.0.0.1") else settings.HOST
-    url = f"http://{display_host}:{settings.PORT}"
+    token_query = f"?token={settings.AUTH_TOKEN}" if settings.AUTH_TOKEN else ""
+    url = f"http://{display_host}:{settings.PORT}/{token_query}"
     print(f"""
     =================================================================
     🌸 CHEEKU AI // NEURAL VOICE OS CORE (HEADLESS BACKEND SERVER) 🌸
@@ -36,6 +38,8 @@ if __name__ == "__main__":
     • Mode: Headless Server (Assistant running ONLY on Frontend)
     • Host: {settings.HOST}:{settings.PORT} (Debug: {settings.DEBUG})
     • Web Client & Interactive HUD: {url}
+    • Auth Protection: {"Active (token-secured)" if settings.AUTH_TOKEN else "Disabled"}
+    • System Actions: {"Enabled" if settings.ENABLE_SYSTEM_ACTIONS else "Disabled (Default Secure)"}
     • Voice, Speech & 3D Visuals: Active exclusively in browser
     
     🚀 Assistant is live! Opening in your browser now...

@@ -28,6 +28,8 @@ wheels/
 .env
 .env.local
 *.env
+.cheeku_token
+backend/.cheeku_token
 
 # SQLite Databases & Local Storage
 *.db

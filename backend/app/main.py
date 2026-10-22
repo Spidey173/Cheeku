@@ -4,7 +4,10 @@ import json
 import base64
 import uuid
 import secrets
-import psutil
+try:
+    import psutil
+except ImportError:
+    psutil = None
 from urllib.parse import urlparse
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -77,6 +80,10 @@ async def broadcast_telemetry_loop():
     """Periodically broadcast host system metrics to HUD."""
     while True:
         try:
+            if psutil is None:
+                await asyncio.sleep(5.0)
+                continue
+
             cpu = psutil.cpu_percent(interval=None)
             ram = psutil.virtual_memory()
             battery = psutil.sensors_battery()
@@ -199,9 +206,12 @@ async def websocket_endpoint(websocket: WebSocket):
     # 3. Establish connection
     await ws_manager.connect(websocket)
 
-    # 4. Bind to session orchestrator (isolated state and history per connection)
-    session_id = websocket.query_params.get("session_id") or str(uuid.uuid4())
-    session_orch = session_registry.get_or_create(session_id, websocket)
+    # 4. Bind to session orchestrator (cryptographically authenticated session)
+    req_session_id = websocket.query_params.get("session_id")
+    req_session_token = websocket.query_params.get("session_token")
+    session_id, session_token, session_orch, was_resumed = session_registry.get_or_resume(
+        req_session_id, req_session_token, websocket
+    )
 
     try:
         # Send initial state and memories to this specific client
@@ -209,6 +219,20 @@ async def websocket_endpoint(websocket: WebSocket):
             websocket,
             session_orch.state,
             "Connected to Cheeku Core."
+        )
+
+        # Notify client of its authenticated session credentials
+        await ws_manager.send_to_socket(
+            websocket,
+            WSMessage(
+                type=WSMessageType.COMMAND,
+                payload={
+                    "command": "session_init",
+                    "session_id": session_id,
+                    "session_token": session_token,
+                    "resumed": was_resumed
+                }
+            )
         )
 
         prefs = memory.get_all_prefs()
@@ -287,11 +311,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
-        await session_registry.remove_session(session_id)
+        await session_registry.on_disconnect(session_id, websocket)
     except Exception as e:
         logger.error(f"[{session_id}] WebSocket connection error: {e}")
         ws_manager.disconnect(websocket)
-        await session_registry.remove_session(session_id)
+        await session_registry.on_disconnect(session_id, websocket)
 
 
 # Mount Frontend static files

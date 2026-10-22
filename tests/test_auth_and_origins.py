@@ -7,7 +7,7 @@ from backend.app.config import settings
 
 def test_allowed_origin_connects():
     with TestClient(app) as client:
-        with client.websocket_connect("/ws", headers={"origin": "http://localhost:8000"}) as ws:
+        with client.websocket_connect(f"/ws?token={settings.AUTH_TOKEN}", headers={"origin": "http://localhost:8000"}) as ws:
             msg = ws.receive_json()
             assert msg["type"] == "state_change"
 
@@ -15,7 +15,7 @@ def test_allowed_origin_connects():
 def test_disallowed_origin_rejected():
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect) as exc_info:
-            with client.websocket_connect("/ws", headers={"origin": "http://evil-attacker.com"}):
+            with client.websocket_connect(f"/ws?token={settings.AUTH_TOKEN}", headers={"origin": "http://evil-attacker.com"}):
                 pass
         assert exc_info.value.code == 1008
 
@@ -23,7 +23,7 @@ def test_disallowed_origin_rejected():
 def test_missing_origin_on_localhost_allowed():
     # Local development tools connecting directly to loopback without Origin header
     with TestClient(app) as client:
-        with client.websocket_connect("/ws") as ws:
+        with client.websocket_connect(f"/ws?token={settings.AUTH_TOKEN}") as ws:
             msg = ws.receive_json()
             assert msg["type"] == "state_change"
 
@@ -59,10 +59,23 @@ def test_auth_token_enforcement(monkeypatch):
             assert msg["type"] == "state_change"
 
 
-def test_safe_local_dev_default_without_auth():
-    # When AUTH_TOKEN is unset, local dev connections succeed
-    assert settings.WS_AUTH_REQUIRED is False
-    assert settings.AUTH_TOKEN is None or settings.AUTH_TOKEN == ""
+def test_secure_by_default_posture():
+    # In secure-by-default configuration, auth is required and token is resolved
+    assert settings.WS_AUTH_REQUIRED is True
+    assert bool(settings.AUTH_TOKEN) is True
+
+    # Connecting without a token is rejected by default
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with client.websocket_connect("/ws", headers={"origin": "http://127.0.0.1:8000"}):
+                pass
+        assert exc_info.value.code == 1008
+
+
+def test_opt_in_unauthenticated_mode(monkeypatch):
+    # When explicitly configured with unauthenticated mode, connections succeed without token
+    monkeypatch.setattr(settings, "WS_AUTH_REQUIRED", False)
+    monkeypatch.setattr(settings, "AUTH_TOKEN", None)
 
     with TestClient(app) as client:
         with client.websocket_connect("/ws", headers={"origin": "http://127.0.0.1:8000"}) as ws:

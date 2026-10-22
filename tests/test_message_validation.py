@@ -1,19 +1,26 @@
 import json
+from contextlib import contextmanager
 import pytest
 from fastapi.testclient import TestClient
 from backend.app.main import app
 from backend.app.config import settings
 
 
+@contextmanager
+def connect_ws(client):
+    with client.websocket_connect(f"/ws?token={settings.AUTH_TOKEN}") as ws:
+        # Drain initial state_change, session_init command, and memory_update
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        yield ws
+
+
 def test_oversized_payload_rejected(monkeypatch):
     monkeypatch.setattr(settings, "MAX_PAYLOAD_BYTES", 2048)
 
     with TestClient(app) as client:
-        with client.websocket_connect("/ws") as ws:
-            # Drain initial state & memory messages
-            ws.receive_json()
-            ws.receive_json()
-
+        with connect_ws(client) as ws:
             oversized_text = "A" * 3000
             ws.send_text(oversized_text)
 
@@ -24,10 +31,7 @@ def test_oversized_payload_rejected(monkeypatch):
 
 def test_malformed_json_rejected():
     with TestClient(app) as client:
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()
-            ws.receive_json()
-
+        with connect_ws(client) as ws:
             ws.send_text("THIS IS NOT JSON {{{{{")
 
             res = ws.receive_json()
@@ -37,10 +41,7 @@ def test_malformed_json_rejected():
 
 def test_unsupported_message_type_rejected():
     with TestClient(app) as client:
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()
-            ws.receive_json()
-
+        with connect_ws(client) as ws:
             ws.send_json({
                 "type": "malicious_unsupported_type",
                 "payload": {"data": "exploit"}
@@ -53,10 +54,7 @@ def test_unsupported_message_type_rejected():
 
 def test_invalid_chat_payload():
     with TestClient(app) as client:
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()
-            ws.receive_json()
-
+        with connect_ws(client) as ws:
             # Chat payload with text exceeding max limit
             ws.send_json({
                 "type": "chat",
@@ -70,10 +68,7 @@ def test_invalid_chat_payload():
 
 def test_invalid_audio_payload():
     with TestClient(app) as client:
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()
-            ws.receive_json()
-
+        with connect_ws(client) as ws:
             # Audio payload missing audio_base64
             ws.send_json({
                 "type": "audio",

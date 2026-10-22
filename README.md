@@ -72,18 +72,25 @@ Cheeku enforces defensive defaults and strict input validation:
    - Validates the `Origin` header on every incoming WebSocket connection against `ALLOWED_ORIGINS` to guard against Cross-Site WebSocket Hijacking (CSWSH).
    - Can be configured for specific domains or local dev hosts (`http://localhost:8000`, `http://127.0.0.1:8000`).
 
-3. **Configurable WebSocket Authentication**:
-   - Supports pre-shared token authentication via `AUTH_TOKEN` in `.env`.
-   - Clients supply the token via query parameter (`/ws?token=...`) or `Authorization: Bearer <token>` header.
-   - Tokens are validated with constant-time comparison (`secrets.compare_digest`).
-   - Default: Safe local development mode (no token required when `AUTH_TOKEN` is unset and `WS_AUTH_REQUIRED=false`).
+3. **Secure-by-Default WebSocket Authentication**:
+   - Authentication is required by default (`WS_AUTH_REQUIRED=true`).
+   - If `AUTH_TOKEN` is not explicitly set in `.env`, Cheeku auto-generates a cryptographically secure 24-character token saved to `backend/.cheeku_token` (file permission `0o600`).
+   - `run.py` automatically starts the local browser with the generated token (`/?token=...`), ensuring frictionless local development while strictly guarding against unauthenticated access if the server port is reachable across a LAN.
+   - Supports query param (`/ws?token=...`) or `Authorization: Bearer <token>` header, verified with constant-time comparison (`secrets.compare_digest`).
 
-4. **Payload Size Limits & Strict Schema Validation**:
+4. **Session Token Isolation & Anti-Hijacking**:
+   - Every client connection is assigned a server-generated `session_id` and a secret 256-bit `session_token`.
+   - Clients cannot hijack another connection's session or overwrite its active WebSocket reference by supplying an arbitrary `session_id`.
+   - Disconnect cleanup validates socket ownership before releasing resources, ensuring one connection's disconnect cannot terminate or disrupt another client's session.
+   - Short-term conversation context is strictly partitioned per session in memory and in SQLite (`session_id` column).
+
+5. **Payload Size Limits & Strict Schema Validation**:
    - Maximum WebSocket frame size enforced at 1 MB (`MAX_PAYLOAD_BYTES`), protecting against memory exhaustion denial-of-service.
    - Incoming JSON messages are strictly parsed and validated against typed Pydantic models. Malformed frames are rejected with structured error messages without crashing the server.
 
-5. **Tool Authorization & Sandboxing**:
-   - Potentially sensitive system actions (`launch_application`, `open_website`, `control_media_player`, `set_system_volume`, `play_youtube_video`) are gated behind `ENABLE_SYSTEM_ACTIONS=true`.
+6. **Tool Authorization & Sandboxing (Disabled by Default)**:
+   - System action tools (`launch_application`, `open_website`, `control_media_player`, `set_system_volume`, `play_youtube_video`) are disabled by default (`ENABLE_SYSTEM_ACTIONS=false`) for defensive posture.
+   - Users must explicitly opt in by setting `ENABLE_SYSTEM_ACTIONS=true` in `.env`.
    - **App Launching**: Restricted to a configurable allowlist (`ALLOWED_SYSTEM_APPS`) with strict regex validation to prevent path traversal or shell argument injection.
    - **Website Opening**: Strictly enforces `http://` and `https://` URL schemes with valid host domains. Rejects `file://`, `javascript:`, `data:`, and command injection characters.
    - **AppleScript Media & Volume**: Enforces action enum allowlists (`play`, `pause`, `playpause`, `next`, `previous`) and numeric volume clamping (0–100%) to prevent AppleScript injection.
@@ -170,7 +177,7 @@ python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
-pip install -r backend/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 2. Configure Environment
@@ -189,16 +196,18 @@ HOST=127.0.0.1
 PORT=8000
 DEBUG=false
 
-# WebSocket Security (Safe local-dev defaults: no token required)
-# To enforce authentication:
+# WebSocket Security (Secure by default: token required)
+# If AUTH_TOKEN is left unset, Cheeku auto-generates a token and run.py launches with it.
+# To enforce a custom static token:
 # AUTH_TOKEN=your_custom_secret_key
-# WS_AUTH_REQUIRED=true
+WS_AUTH_REQUIRED=true
 ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
 ALLOW_ALL_ORIGINS=false
 MAX_PAYLOAD_BYTES=1048576
 
-# System Actions
-ENABLE_SYSTEM_ACTIONS=true
+# System Actions (Disabled by default for security)
+# Set to true to authorize launching local apps, media control, and volume changes:
+ENABLE_SYSTEM_ACTIONS=false
 ALLOWED_SYSTEM_APPS=Safari,Google Chrome,Spotify,Terminal,Notes,Calculator,Visual Studio Code,Slack,Music,System Settings
 REQUEST_TIMEOUT_SECONDS=15.0
 
@@ -218,28 +227,30 @@ TTS_PITCH=+0Hz
 python run.py
 ```
 
-The server binds to `http://127.0.0.1:8000` and automatically launches your default browser.
+The server binds to `http://127.0.0.1:8000` and automatically launches your default browser with the session token attached.
 
-If you have configured `AUTH_TOKEN`, access the interface with your token:
-👉 `http://127.0.0.1:8000/?token=your_custom_secret_key`
+To connect manually with a configured or auto-generated token:
+👉 `http://127.0.0.1:8000/?token=your_auth_token`
 
 ---
 
 ## 🧪 Automated Test Suite
 
-Cheeku includes a comprehensive automated test suite with **34 passing tests** across 8 test modules. All external APIs and OS subprocesses are safely mocked.
+Cheeku includes a comprehensive automated test suite with **36 passing tests** across 8 test modules. All external APIs and OS subprocesses are safely mocked, and optional dependencies (`psutil`, `edge_tts`, `duckduckgo_search`) fail gracefully with built-in fallbacks.
 
 To run the complete test suite:
 
 ```bash
+python3 -m pytest -q
+# or
 ./venv/bin/pytest -v
 ```
 
 ### Test Coverage Summary:
-- `tests/test_auth_and_origins.py`: Validates allowed and disallowed origins, CSWSH prevention, token enforcement in query params and headers, and safe local-dev defaults.
+- `tests/test_auth_and_origins.py`: Validates allowed and disallowed origins, CSWSH prevention, token enforcement in query params and headers, auto-generated local tokens, and secure-by-default posture.
+- `tests/test_session_isolation.py`: Tests that concurrent WebSocket client connections maintain isolated short-term conversation histories in memory and SQLite, verifies cryptographic session token resumption, and asserts that unauthorized clients cannot hijack another connection's session or cause disconnect cleanup interference.
 - `tests/test_message_validation.py`: Tests maximum frame payload limits, malformed JSON handling, unsupported message types, and schema validation.
-- `tests/test_tool_security.py`: Tests policy gates (`ENABLE_SYSTEM_ACTIONS`), application name allowlists, shell metacharacter rejection, URL scheme restrictions (`file://`, `javascript:` blocked), AppleScript injection guards, and volume clamping.
-- `tests/test_session_isolation.py`: Tests that concurrent WebSocket client connections maintain isolated short-term conversation histories and independent states.
+- `tests/test_tool_security.py`: Tests policy gates (`ENABLE_SYSTEM_ACTIONS=false` by default), application name allowlists, shell metacharacter rejection, URL scheme restrictions (`file://`, `javascript:` blocked), AppleScript injection guards, and volume clamping.
 - `tests/test_concurrency_and_lifecycle.py`: Tests barge-in cancellation on rapid overlapping turns, client disconnect task cleanup, and server shutdown awaiting.
 - `tests/test_error_handling.py`: Tests Groq timeouts, upstream HTTP errors, TTS fallback cascades, STT model unavailability, and tool exception handling.
 - `tests/test_state_machine.py`: Tests deterministic FSM transitions, legal sequences, illegal jump rejections, and forced recovery.

@@ -5,7 +5,10 @@ import tempfile
 import base64
 import asyncio
 import httpx
-import edge_tts
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
 from typing import Optional, Dict, Any
 from backend.utils.logger import logger
 
@@ -164,6 +167,9 @@ class NeuralVoiceEngine:
         return None
 
     async def _synthesize_edge_tts(self, text: str) -> Optional[Dict[str, str]]:
+        if edge_tts is None:
+            return None
+
         voice = self.edge_voice
         if "DragonHDLatest" in voice or "Dragon" in voice or voice == "en-US-Ava:DragonHDLatestNeural":
             voice = "en-US-AvaMultilingualNeural"

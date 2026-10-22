@@ -1,7 +1,8 @@
 import asyncio
 import json
 import time
-from typing import Optional, Dict, Set, Any, List
+import secrets
+from typing import Optional, Dict, Set, Any, List, Tuple
 from fastapi import WebSocket
 from backend.models.schemas import AssistantState, ChatMessage, MessageRole
 from backend.brain.groq import groq_client
@@ -125,8 +126,15 @@ class AssistantOrchestrator:
         if len(self.short_term_history) > settings.MAX_HISTORY_TURNS * 2:
             self.short_term_history = self.short_term_history[-settings.MAX_HISTORY_TURNS * 2:]
 
-        # Also persist to global database log
-        memory.add_short_term(role, content, tool_call_id, tool_calls, name)
+        # Also persist to session-isolated database log
+        memory.add_short_term(
+            role=role,
+            content=content,
+            session_id=self.session_id,
+            tool_call_id=tool_call_id,
+            tool_calls=tool_calls,
+            name=name
+        )
 
     async def set_state(self, new_state: AssistantState, details: str = "", force: bool = False) -> bool:
         """
@@ -391,22 +399,75 @@ class AssistantOrchestrator:
 
 
 class SessionRegistry:
-    """Manages active assistant orchestrator sessions."""
+    """
+    Manages active assistant orchestrator sessions with cryptographic tokens.
+    Prevents unauthorized session reuse, session hijacking, and cross-client disconnect interference.
+    """
     def __init__(self):
         self._sessions: Dict[str, AssistantOrchestrator] = {}
+        self._session_tokens: Dict[str, str] = {}
         self._lock = asyncio.Lock()
 
+    def create_session(self, websocket: Optional[WebSocket] = None) -> Tuple[str, str, AssistantOrchestrator]:
+        """Generates a new secure session with an unguessable secret token."""
+        session_id = f"sess_{secrets.token_hex(12)}"
+        session_token = secrets.token_hex(32)
+        orch = AssistantOrchestrator(session_id=session_id, websocket=websocket)
+        orch.state = AssistantState.READY
+        self._sessions[session_id] = orch
+        self._session_tokens[session_id] = session_token
+        return session_id, session_token, orch
+
+    def get_or_resume(
+        self,
+        requested_session_id: Optional[str],
+        provided_session_token: Optional[str],
+        websocket: Optional[WebSocket] = None
+    ) -> Tuple[str, str, AssistantOrchestrator, bool]:
+        """
+        Resumes an existing session only when the valid session_token is provided.
+        Rejects client attempts to specify/claim a session_id without the secret token,
+        and generates a new isolated session instead.
+        """
+        if requested_session_id and provided_session_token:
+            if requested_session_id in self._sessions:
+                stored_token = self._session_tokens.get(requested_session_id, "")
+                if stored_token and secrets.compare_digest(stored_token, provided_session_token):
+                    orch = self._sessions[requested_session_id]
+                    orch.websocket = websocket
+                    return requested_session_id, stored_token, orch, True
+                else:
+                    logger.warning(f"Rejected attempt to attach to session '{requested_session_id}': invalid session token.")
+
+        session_id, session_token, orch = self.create_session(websocket=websocket)
+        return session_id, session_token, orch, False
+
     def get_or_create(self, session_id: str, websocket: Optional[WebSocket] = None) -> AssistantOrchestrator:
+        """Compatibility helper for direct test instantiation."""
         if session_id not in self._sessions:
             orch = AssistantOrchestrator(session_id=session_id, websocket=websocket)
             orch.state = AssistantState.READY
             self._sessions[session_id] = orch
+            self._session_tokens[session_id] = secrets.token_hex(32)
         else:
             if websocket is not None:
                 self._sessions[session_id].websocket = websocket
         return self._sessions[session_id]
 
+    async def on_disconnect(self, session_id: str, websocket: WebSocket):
+        """
+        Disconnect cleanup: unbinds the websocket and interrupts in-flight processing
+        only if the disconnecting socket is the active WebSocket for this session.
+        Preserves session context for legitimate token-authenticated reconnection.
+        """
+        orch = self._sessions.get(session_id)
+        if orch and orch.websocket == websocket:
+            orch.websocket = None
+            await orch.interrupt("Client disconnected")
+            logger.info(f"Session '{session_id}' unlinked from disconnected websocket.")
+
     async def remove_session(self, session_id: str):
+        self._session_tokens.pop(session_id, None)
         orch = self._sessions.pop(session_id, None)
         if orch:
             await orch.shutdown()
@@ -416,6 +477,7 @@ class SessionRegistry:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._sessions.clear()
+        self._session_tokens.clear()
 
     def count(self) -> int:
         return len(self._sessions)

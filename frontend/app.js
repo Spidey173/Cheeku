@@ -823,22 +823,28 @@ class CheekuOS {
     /* ==========================================================================
        WEBSOCKET BRIDGE
        ========================================================================== */
+    connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const urlParams = new URLSearchParams(window.location.search);
         const token = urlParams.get('token') || localStorage.getItem('cheeku_auth_token');
-        if (!this.sessionId) {
-            this.sessionId = urlParams.get('session_id') || 'sess_' + Math.random().toString(36).substring(2, 11);
-        }
+        const savedSessionId = sessionStorage.getItem('cheeku_session_id');
+        const savedSessionToken = sessionStorage.getItem('cheeku_session_token');
 
-        let wsUrl = `${protocol}//${window.location.host}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
-        if (token) {
-            wsUrl += `&token=${encodeURIComponent(token)}`;
+        let wsUrl = `${protocol}//${window.location.host}/ws`;
+        const queryParts = [];
+        if (token) queryParts.push(`token=${encodeURIComponent(token)}`);
+        if (savedSessionId && savedSessionToken) {
+            queryParts.push(`session_id=${encodeURIComponent(savedSessionId)}`);
+            queryParts.push(`session_token=${encodeURIComponent(savedSessionToken)}`);
+        }
+        if (queryParts.length > 0) {
+            wsUrl += '?' + queryParts.join('&');
         }
 
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-            console.log('Cheeku Neural WebSocket Connected (Session: ' + this.sessionId + ').');
+            console.log('Cheeku Neural WebSocket Connected.');
         };
 
         this.ws.onmessage = (event) => {
@@ -910,6 +916,16 @@ class CheekuOS {
                 if (msg.payload && msg.payload.audio_base64) {
                     const mime = msg.payload.mime_type || 'audio/wav';
                     this.playAudioData(msg.payload.audio_base64, mime);
+                }
+                break;
+
+            case 'command':
+                if (msg.payload && msg.payload.command === 'session_init') {
+                    if (msg.payload.session_id && msg.payload.session_token) {
+                        sessionStorage.setItem('cheeku_session_id', msg.payload.session_id);
+                        sessionStorage.setItem('cheeku_session_token', msg.payload.session_token);
+                        console.log(`[Cheeku] Authenticated session established: ${msg.payload.session_id} (resumed: ${Boolean(msg.payload.resumed)})`);
+                    }
                 }
                 break;
 

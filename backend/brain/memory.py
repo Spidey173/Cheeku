@@ -9,10 +9,16 @@ from backend.utils.logger import logger
 
 
 class MemoryManager:
+    """
+    Session-aware Memory Manager for Cheeku AI.
+    Isolates short-term conversation context per session while persisting
+    long-term facts and notes safely.
+    """
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or os.path.join(settings.DATA_DIR, "cheeku_memory.db")
         self._init_db()
-        self.short_term_history: List[ChatMessage] = []
+        # Isolated short-term conversation memory per session ID
+        self._session_histories: Dict[str, List[ChatMessage]] = {}
 
     def _init_db(self):
         try:
@@ -29,6 +35,7 @@ class MemoryManager:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS conversation_history (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL DEFAULT 'default',
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
                         timestamp REAL NOT NULL
@@ -42,21 +49,33 @@ class MemoryManager:
                         created_at REAL NOT NULL
                     )
                 """)
+
+                # Check if session_id column exists in existing database
+                cursor.execute("PRAGMA table_info(conversation_history)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if "session_id" not in columns:
+                    cursor.execute("ALTER TABLE conversation_history ADD COLUMN session_id TEXT NOT NULL DEFAULT 'default'")
+
                 conn.commit()
                 logger.info(f"Memory database initialized at {self.db_path}")
         except Exception as e:
             logger.error(f"Failed to initialize memory database: {e}")
 
-    # --- Short-term Memory (Sliding Window) ---
+    # --- Short-term Memory (Strictly Isolated by Session) ---
     def add_short_term(
         self,
         role: MessageRole,
         content: str,
+        session_id: str = "default",
         tool_call_id: Optional[str] = None,
         tool_calls: Optional[List[Dict[str, Any]]] = None,
         name: Optional[str] = None
     ):
-        self.short_term_history.append(
+        if session_id not in self._session_histories:
+            self._session_histories[session_id] = []
+
+        history = self._session_histories[session_id]
+        history.append(
             ChatMessage(
                 role=role,
                 content=content or "",
@@ -66,24 +85,24 @@ class MemoryManager:
                 timestamp=time.time()
             )
         )
-        if len(self.short_term_history) > settings.MAX_HISTORY_TURNS * 2:
-            self.short_term_history = self.short_term_history[-settings.MAX_HISTORY_TURNS * 2:]
+        if len(history) > settings.MAX_HISTORY_TURNS * 2:
+            self._session_histories[session_id] = history[-settings.MAX_HISTORY_TURNS * 2:]
 
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
-                    "INSERT INTO conversation_history (role, content, timestamp) VALUES (?, ?, ?)",
-                    (role.value, content or "", time.time())
+                    "INSERT INTO conversation_history (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (session_id, role.value, content or "", time.time())
                 )
                 conn.commit()
         except Exception as e:
             logger.error(f"Error saving to long-term conversation log: {e}")
 
-    def get_short_term(self) -> List[ChatMessage]:
-        return list(self.short_term_history)
+    def get_short_term(self, session_id: str = "default") -> List[ChatMessage]:
+        return list(self._session_histories.get(session_id, []))
 
-    def clear_short_term(self):
-        self.short_term_history.clear()
+    def clear_short_term(self, session_id: str = "default"):
+        self._session_histories.pop(session_id, None)
 
     # --- Long-term Key-Value Memory ---
     def set_pref(self, key: str, value: Any, category: str = "general"):

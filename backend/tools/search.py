@@ -1,6 +1,9 @@
 import asyncio
 import re
-from duckduckgo_search import DDGS
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    DDGS = None
 from backend.tools.registry import register_tool
 from backend.utils.logger import logger
 
@@ -28,6 +31,9 @@ from backend.utils.logger import logger
 async def web_search(query: str, max_results: int = 3) -> str:
     if not isinstance(query, str) or not query.strip():
         return "Error: Search query must be a non-empty string."
+
+    if DDGS is None:
+        return "Web search is unavailable (duckduckgo-search package is not installed)."
 
     clean_query = query.strip()[:300]
     clean_query = re.sub(r"[\x00-\x1f\x7f]", "", clean_query)

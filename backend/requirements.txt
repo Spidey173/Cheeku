@@ -7,3 +7,6 @@ edge-tts>=7.3.1
 psutil>=5.9.8
 duckduckgo-search>=5.0.0
 aiofiles>=23.2.1
+python-dotenv>=1.0.0
+pytest>=8.0.0
+anyio>=4.0.0
