@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Cheeku AI // Neural Voice OS Web Demo</title>
+    <meta name="description" content="Experience Cheeku AI: an event-driven neural voice assistant featuring a Three.js 3D WebGL shader core, real-time voice speech interaction, and autonomous system tools.">
+    
+    <!-- Open Graph / Meta -->
+    <meta property="og:title" content="Cheeku AI // Neural Voice OS">
+    <meta property="og:description" content="Autonomous personal voice assistant with Three.js 3D WebGL HUD and neural reasoning.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://cheeku17.vercel.app/">
+    
+    <!-- Google Typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Outfit:wght@300;400;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Three.js + PostProcessing CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    
+    <!-- GSAP for smooth animations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="state-idle">
+    <!-- 3D WebGL Canvas Layer -->
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- Futuristic Boot Sequence Overlay -->
+    <div id="boot-overlay" class="boot-overlay">
+        <div class="boot-spark" id="boot-spark"></div>
+        <div class="boot-shockwave" id="boot-shockwave"></div>
+        <div class="boot-loader">
+            <div class="boot-title">CHEEKU OS</div>
+            <div class="boot-sub" id="boot-status">INITIALIZING NEURAL CORE</div>
+            <div class="boot-bar"><div class="boot-progress" id="boot-bar-fill"></div></div>
+        </div>
+    </div>
+
+    <!-- HUD Chrome Overlay -->
+    <div class="hud-layer">
+        <!-- Top Status Bar -->
+        <header class="hud-top">
+            <div class="hud-brand">
+                <div class="brand-beacon">
+                    <span class="beacon-core"></span>
+                    <span class="beacon-halo"></span>
+                </div>
+                <div class="brand-meta">
+                    <h1 class="brand-title">CHEEKU</h1>
+                    <span class="brand-badge">VERCEL DEMO</span>
+                </div>
+            </div>
+
+            <div class="hud-metrics">
+                <div class="metric-badge" title="Simulated CPU Usage">
+                    <span class="metric-label">CPU</span>
+                    <span class="metric-val" id="tel-cpu">14%</span>
+                </div>
+                <div class="metric-badge" title="Memory Allocation">
+                    <span class="metric-label">RAM</span>
+                    <span class="metric-val" id="tel-ram">3.2 GB</span>
+                </div>
+                <div class="hud-telemetry-pill" id="state-pill">
+                    <span class="state-dot"></span>
+                    <span class="state-label" id="state-text">READY</span>
+                </div>
+                <button type="button" class="hud-icon-btn" id="settings-btn" title="Open Settings & API Options" aria-label="Settings">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+                <a href="https://github.com/Spidey173/Cheeku" target="_blank" rel="noopener noreferrer" class="hud-icon-btn github-link" title="View Source on GitHub" aria-label="GitHub Repository">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                    </svg>
+                </a>
+            </div>
+        </header>
+
+        <!-- VisionOS-style Live Voice Transcription Pill -->
+        <div id="transcript-bar" class="transcript-bar hidden">
+            <span class="transcript-dot"></span>
+            <span class="transcript-text" id="live-transcript-text">Listening...</span>
+        </div>
+
+        <!-- 3D AI Core Interactive Hit Zone -->
+        <div class="core-trigger-anchor" id="core-trigger" role="button" aria-label="Engage Cheeku Neural Core">
+            <div class="trigger-icon">
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="22"/>
+                </svg>
+            </div>
+            <div class="trigger-hint" id="trigger-hint">TAP TO SPEAK OR PRESS SPACEBAR</div>
+        </div>
+
+        <!-- Holographic Action Card (System Tool Execution) -->
+        <div id="action-hud" class="action-hud hidden">
+            <div class="action-card">
+                <div class="action-header">
+                    <div class="action-badge" id="action-icon">🎵</div>
+                    <div class="action-meta">
+                        <span class="action-type" id="action-type">SYSTEM DIRECTIVE</span>
+                        <h2 class="action-title" id="action-title">DISPATCHING YOUTUBE</h2>
+                    </div>
+                    <button type="button" class="action-close-btn" id="action-close-btn" aria-label="Dismiss">&times;</button>
+                </div>
+                <div class="action-body">
+                    <p class="action-detail" id="action-detail">"Lofi Chill Beats - Ambient Coding Session"</p>
+                    <div class="action-progress-track">
+                        <div class="action-progress-fill" id="action-progress"></div>
+                    </div>
+                    <div id="action-embed-container" class="action-embed-container hidden"></div>
+                </div>
+                <div class="action-footer">
+                    <span class="action-status-tag" id="action-status-tag">ACTIVE TRANSMISSION</span>
+                    <span class="action-latency">0.08ms</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Holographic Response Floater -->
+        <div id="holo-speech-floater" class="holo-speech-floater hidden">
+            <div class="floater-bracket bl-bracket"></div>
+            <div class="floater-bracket br-bracket"></div>
+            <div class="floater-content">
+                <div class="floater-meta">
+                    <span class="floater-sender">CHEEKU // SYNAPSE</span>
+                    <span class="floater-audio-wave">
+                        <span></span><span></span><span></span><span></span><span></span>
+                    </span>
+                </div>
+                <div class="floater-text" id="holo-response-text">I am online and listening. How can I assist you?</div>
+            </div>
+        </div>
+
+        <!-- Bottom HUD: Prompt Chips & Interactive Command Dock -->
+        <footer class="hud-bottom">
+            <!-- Suggested Prompt Chips for Fast Demo Exploration -->
+            <div class="prompt-chips-container" id="prompt-chips">
+                <button type="button" class="prompt-chip" data-query="Who are you?">
+                    <span class="chip-icon">✨</span> Who are you?
+                </button>
+                <button type="button" class="prompt-chip" data-query="Scan system vitals">
+                    <span class="chip-icon">📊</span> System Vitals
+                </button>
+                <button type="button" class="prompt-chip" data-query="Play synthwave music">
+                    <span class="chip-icon">🎵</span> Play Synthwave
+                </button>
+                <button type="button" class="prompt-chip" data-query="Save note: Cheeku deployed on Vercel">
+                    <span class="chip-icon">📝</span> Save Note
+                </button>
+                <button type="button" class="prompt-chip" data-query="Tell me a witty joke">
+                    <span class="chip-icon">😄</span> Tell a Joke
+                </button>
+                <button type="button" class="prompt-chip" data-query="What tools and abilities do you have?">
+                    <span class="chip-icon">🧠</span> Capabilities
+                </button>
+            </div>
+
+            <!-- Cyber-Glassmorphic HUD Command & Chat Dock -->
+            <div class="hud-chat-dock" id="hud-chat-dock">
+                <form id="chat-form" class="chat-form" onsubmit="event.preventDefault();">
+                    <button type="button" id="mic-dock-btn" class="chat-dock-btn mic-btn" aria-label="Toggle Voice Input" title="Voice Input (Spacebar)">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="22"/>
+                        </svg>
+                    </button>
+                    <button type="button" id="voice-test-btn" class="chat-dock-btn voice-btn" aria-label="Audio Sound" title="Audio Waveform Sound">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                        </svg>
+                    </button>
+                    <input 
+                        type="text" 
+                        id="chat-input" 
+                        class="chat-input" 
+                        placeholder="Talk or command Cheeku... (e.g. 'play synthwave' or 'scan vitals')" 
+                        autocomplete="off" 
+                        spellcheck="false"
+                    />
+                    <button type="submit" id="send-dock-btn" class="chat-dock-btn send-btn" aria-label="Send Directive" title="Send Directive">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"/>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+
+            <div class="waveform-meter">
+                <div class="eq-bars" id="eq-bars">
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                    <span class="eq-bar"></span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Settings & API Drawer Modal -->
+    <div id="settings-modal" class="settings-modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="settings-backdrop" id="settings-backdrop"></div>
+        <div class="settings-card">
+            <div class="settings-header">
+                <div class="settings-title-group">
+                    <h2 id="settings-title">Neural Engine Settings</h2>
+                    <p class="settings-subtitle">Configure demo intelligence & voice parameters</p>
+                </div>
+                <button type="button" class="settings-close-btn" id="settings-close-btn" aria-label="Close Settings">&times;</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-group">
+                    <label for="groq-api-key" class="settings-label">
+                        <span>Groq Cloud API Key</span>
+                        <span class="settings-tag">Optional</span>
+                    </label>
+                    <p class="settings-hint">Leave blank to use Cheeku's fast built-in neural mock engine, or enter your Groq key for unconstrained live LLM generation:</p>
+                    <input type="password" id="groq-api-key" class="settings-input" placeholder="gsk_..." autocomplete="off">
+                </div>
+
+                <div class="settings-group">
+                    <label for="voice-select" class="settings-label">
+                        <span>Speech Synthesis Voice</span>
+                    </label>
+                    <select id="voice-select" class="settings-select">
+                        <option value="default">Default Browser Voice</option>
+                    </select>
+                </div>
+
+                <div class="settings-group">
+                    <label class="settings-label">
+                        <span>Sound Effects (SFX)</span>
+                    </label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="sfx-toggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="settings-group about-section">
+                    <h3 class="about-title">About Cheeku AI</h3>
+                    <p class="about-desc">
+                        Cheeku is an asynchronous personal voice assistant featuring an event-driven Finite State Machine (FSM), 
+                        low-latency barge-in cancellation, Groq LPU tool calling, and an interactive Three.js 3D WebGL core.
+                    </p>
+                    <a href="https://github.com/Spidey173/Cheeku" target="_blank" rel="noopener noreferrer" class="about-link">
+                        GitHub Repository &rarr;
+                    </a>
+                </div>
+            </div>
+            <div class="settings-footer">
+                <button type="button" class="settings-save-btn" id="settings-save-btn">Save Preferences</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Audio Player -->
+    <audio id="tts-audio-player" style="display:none;"></audio>
+
+    <script src="app.js"></script>
+</body>
+</html>
