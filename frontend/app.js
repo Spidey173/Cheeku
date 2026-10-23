@@ -841,21 +841,25 @@ class CheekuOS {
         const savedSessionId = sessionStorage.getItem('cheeku_session_id') || '';
         const savedSessionToken = sessionStorage.getItem('cheeku_session_token') || '';
 
-        // Production-Hardened: Connect cleanly with ZERO tokens in URL query string
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
+        // Server auth token is required for the WebSocket HTTP upgrade handshake in browsers
+        let wsUrl = `${protocol}//${window.location.host}/ws`;
+        if (token) {
+            wsUrl += `?token=${encodeURIComponent(token)}`;
+        }
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-            console.log('Cheeku Neural WebSocket Connected. Transmitting in-band credentials...');
-            // In-band authentication handshake: avoids query param exposure in server logs & browser history
-            this.ws.send(JSON.stringify({
-                type: 'authenticate',
-                payload: {
-                    token: token,
-                    session_id: savedSessionId,
-                    session_token: savedSessionToken
-                }
-            }));
+            console.log('Cheeku Neural WebSocket Connected.');
+            // In-band session resumption: resume session credentials without query param exposure
+            if (savedSessionId && savedSessionToken) {
+                this.ws.send(JSON.stringify({
+                    type: 'session_resume',
+                    payload: {
+                        session_id: savedSessionId,
+                        session_token: savedSessionToken
+                    }
+                }));
+            }
         };
 
         this.ws.onmessage = (event) => {
@@ -867,7 +871,13 @@ class CheekuOS {
             }
         };
 
-        this.ws.onclose = () => {
+        this.ws.onclose = (event) => {
+            if (event && event.code === 1008) {
+                console.warn('WebSocket rejected: Authentication failed or origin disallowed (code 1008).');
+                this.setHint('⚠️ Auth failed. Open with ?token=<token>');
+                this.setState('ERROR', 'Authentication required. Check token.');
+                return;
+            }
             console.warn('WebSocket closed. Reconnecting in 2s...');
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = setTimeout(() => this.connectWebSocket(), 2000);

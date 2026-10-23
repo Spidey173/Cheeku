@@ -283,9 +283,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         res_id, res_tok, websocket, user_id=user_id
                     )
                     if resumed_ok:
+                        old_temp_id = session_id
                         session_id = new_id
                         session_token = new_tok
                         session_orch = new_orch
+                        if old_temp_id != new_id:
+                            await session_registry.remove_session(old_temp_id)
                         logger.info(f"Session '{session_id}' successfully resumed in-band.")
                         await ws_manager.send_to_socket(
                             websocket,
