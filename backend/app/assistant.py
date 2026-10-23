@@ -76,8 +76,9 @@ class AssistantOrchestrator:
     Controller for Cheeku AI Voice OS Assistant session.
     Coordinates Deterministic State Machine, Task Cancellation, Groq Brain, Tools, and Audio per session.
     """
-    def __init__(self, session_id: str = "default", websocket: Optional[WebSocket] = None):
+    def __init__(self, session_id: str = "default", websocket: Optional[WebSocket] = None, user_id: Optional[str] = None):
         self.session_id: str = session_id
+        self.user_id: str = user_id or session_id
         self.websocket: Optional[WebSocket] = websocket
         self.state: AssistantState = AssistantState.BOOTING
         self.is_processing: bool = False
@@ -251,7 +252,7 @@ class AssistantOrchestrator:
             await self.set_state(AssistantState.THINKING, "Consulting Groq Neural Brain...")
 
             # 3. Call Brain (Groq qwen/qwen3.8-27b) using session history
-            response = await groq_client.generate_response(self.short_term_history)
+            response = await groq_client.generate_response(self.short_term_history, session_id=self.session_id)
 
             tool_calls = response.get("tool_calls", [])
             reply_text = response.get("content", "")
@@ -302,8 +303,8 @@ class AssistantOrchestrator:
                         {"args": fn_args, "title": label, "detail": detail, "status": "active"}
                     )
 
-                    # Execute tool safely
-                    tool_output = await registry.execute(fn_name, fn_args)
+                    # Execute tool safely with session context
+                    tool_output = await registry.execute(fn_name, fn_args, session_id=self.session_id)
                     await ws_manager.send_tool_result_to(
                         self.websocket,
                         fn_name,
@@ -320,7 +321,7 @@ class AssistantOrchestrator:
 
                 # Formulate natural conversational reply from tool results
                 await self.set_state(AssistantState.GENERATING, "Formulating voice reply...")
-                followup = await groq_client.generate_response(self.short_term_history)
+                followup = await groq_client.generate_response(self.short_term_history, session_id=self.session_id)
                 reply_text = followup.get("content", reply_text)
 
             # Clean reply if it's empty
@@ -408,11 +409,11 @@ class SessionRegistry:
         self._session_tokens: Dict[str, str] = {}
         self._lock = asyncio.Lock()
 
-    def create_session(self, websocket: Optional[WebSocket] = None) -> Tuple[str, str, AssistantOrchestrator]:
+    def create_session(self, websocket: Optional[WebSocket] = None, user_id: Optional[str] = None) -> Tuple[str, str, AssistantOrchestrator]:
         """Generates a new secure session with an unguessable secret token."""
         session_id = f"sess_{secrets.token_hex(12)}"
         session_token = secrets.token_hex(32)
-        orch = AssistantOrchestrator(session_id=session_id, websocket=websocket)
+        orch = AssistantOrchestrator(session_id=session_id, websocket=websocket, user_id=user_id)
         orch.state = AssistantState.READY
         self._sessions[session_id] = orch
         self._session_tokens[session_id] = session_token
@@ -422,7 +423,8 @@ class SessionRegistry:
         self,
         requested_session_id: Optional[str],
         provided_session_token: Optional[str],
-        websocket: Optional[WebSocket] = None
+        websocket: Optional[WebSocket] = None,
+        user_id: Optional[str] = None
     ) -> Tuple[str, str, AssistantOrchestrator, bool]:
         """
         Resumes an existing session only when the valid session_token is provided.
@@ -435,11 +437,13 @@ class SessionRegistry:
                 if stored_token and secrets.compare_digest(stored_token, provided_session_token):
                     orch = self._sessions[requested_session_id]
                     orch.websocket = websocket
+                    if user_id:
+                        orch.user_id = user_id
                     return requested_session_id, stored_token, orch, True
                 else:
                     logger.warning(f"Rejected attempt to attach to session '{requested_session_id}': invalid session token.")
 
-        session_id, session_token, orch = self.create_session(websocket=websocket)
+        session_id, session_token, orch = self.create_session(websocket=websocket, user_id=user_id)
         return session_id, session_token, orch, False
 
     def get_or_create(self, session_id: str, websocket: Optional[WebSocket] = None) -> AssistantOrchestrator:

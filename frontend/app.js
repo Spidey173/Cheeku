@@ -826,25 +826,36 @@ class CheekuOS {
     connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const urlParams = new URLSearchParams(window.location.search);
-        const token = urlParams.get('token') || localStorage.getItem('cheeku_auth_token');
-        const savedSessionId = sessionStorage.getItem('cheeku_session_id');
-        const savedSessionToken = sessionStorage.getItem('cheeku_session_token');
-
-        let wsUrl = `${protocol}//${window.location.host}/ws`;
-        const queryParts = [];
-        if (token) queryParts.push(`token=${encodeURIComponent(token)}`);
-        if (savedSessionId && savedSessionToken) {
-            queryParts.push(`session_id=${encodeURIComponent(savedSessionId)}`);
-            queryParts.push(`session_token=${encodeURIComponent(savedSessionToken)}`);
-        }
-        if (queryParts.length > 0) {
-            wsUrl += '?' + queryParts.join('&');
+        let token = urlParams.get('token');
+        if (token) {
+            localStorage.setItem('cheeku_auth_token', token);
+            // Clean token from browser URL & history immediately to prevent exposure
+            if (window.history && window.history.replaceState) {
+                const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                window.history.replaceState({}, document.title, cleanUrl);
+            }
+        } else {
+            token = localStorage.getItem('cheeku_auth_token') || '';
         }
 
+        const savedSessionId = sessionStorage.getItem('cheeku_session_id') || '';
+        const savedSessionToken = sessionStorage.getItem('cheeku_session_token') || '';
+
+        // Production-Hardened: Connect cleanly with ZERO tokens in URL query string
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-            console.log('Cheeku Neural WebSocket Connected.');
+            console.log('Cheeku Neural WebSocket Connected. Transmitting in-band credentials...');
+            // In-band authentication handshake: avoids query param exposure in server logs & browser history
+            this.ws.send(JSON.stringify({
+                type: 'authenticate',
+                payload: {
+                    token: token,
+                    session_id: savedSessionId,
+                    session_token: savedSessionToken
+                }
+            }));
         };
 
         this.ws.onmessage = (event) => {

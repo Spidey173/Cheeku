@@ -44,14 +44,15 @@ class GroqBrainClient:
         self,
         messages: List[ChatMessage],
         user_name: Optional[str] = None,
-        context_notes: Optional[str] = None
+        context_notes: Optional[str] = None,
+        session_id: str = "default"
     ) -> Dict[str, Any]:
         """
         Sends dialogue history and tool definitions to Groq chat completions.
         Returns generated content and any requested tool calls.
         """
-        current_user = user_name or memory.get_pref("user_name")
-        current_context = context_notes if context_notes is not None else memory.get_context_summary()
+        current_user = user_name or memory.get_pref("user_name", session_id=session_id)
+        current_context = context_notes if context_notes is not None else memory.get_context_summary(session_id=session_id)
         sys_prompt = get_system_prompt(current_user, current_context)
 
         # Build message history for OpenAI-compatible endpoint

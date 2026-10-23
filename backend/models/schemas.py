@@ -43,6 +43,7 @@ class WSMessageType(str, Enum):
     ERROR = "error"
     COMMAND = "command"
     AUDIO_FAILED = "audio_failed"
+    AUTHENTICATE = "authenticate"
 
 
 class WSMessage(BaseModel):
@@ -86,6 +87,12 @@ class InboundStateChangePayload(BaseModel):
     state: str = Field(..., max_length=50)
 
 
+class InboundAuthPayload(BaseModel):
+    token: Optional[str] = Field(default=None, max_length=500)
+    session_id: Optional[str] = Field(default=None, max_length=100)
+    session_token: Optional[str] = Field(default=None, max_length=200)
+
+
 class InboundMessage(BaseModel):
     type: str = Field(..., max_length=50)
     payload: Dict[str, Any] = Field(default_factory=dict)
@@ -93,7 +100,7 @@ class InboundMessage(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"chat", "transcript", "audio", "state_change", "interrupt"}
+        allowed = {"chat", "transcript", "audio", "state_change", "interrupt", "authenticate", "session_resume"}
         if v not in allowed:
             raise ValueError(f"Unsupported message type '{v}'. Allowed: {', '.join(sorted(allowed))}")
         return v

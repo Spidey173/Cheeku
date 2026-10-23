@@ -72,17 +72,19 @@ Cheeku enforces defensive defaults and strict input validation:
    - Validates the `Origin` header on every incoming WebSocket connection against `ALLOWED_ORIGINS` to guard against Cross-Site WebSocket Hijacking (CSWSH).
    - Can be configured for specific domains or local dev hosts (`http://localhost:8000`, `http://127.0.0.1:8000`).
 
-3. **Secure-by-Default WebSocket Authentication**:
+3. **Secure-by-Default WebSocket Authentication & Query Sanitization**:
    - Authentication is required by default (`WS_AUTH_REQUIRED=true`).
    - If `AUTH_TOKEN` is not explicitly set in `.env`, Cheeku auto-generates a cryptographically secure 24-character token saved to `backend/.cheeku_token` (file permission `0o600`).
    - `run.py` automatically starts the local browser with the generated token (`/?token=...`), ensuring frictionless local development while strictly guarding against unauthenticated access if the server port is reachable across a LAN.
+   - **Browser URL Sanitization**: The frontend immediately removes `?token=...` from the browser address bar upon page load using `window.history.replaceState`, preventing the token from lingering in the user's browser history or devtools bar.
    - Supports query param (`/ws?token=...`) or `Authorization: Bearer <token>` header, verified with constant-time comparison (`secrets.compare_digest`).
 
-4. **Session Token Isolation & Anti-Hijacking**:
+4. **In-Band Session Resumption & Anti-Hijacking**:
    - Every client connection is assigned a server-generated `session_id` and a secret 256-bit `session_token`.
+   - **Zero Session Tokens in Query Parameters**: Reconnecting clients resume sessions strictly via in-band WebSocket data frames (`{"type": "session_resume", "payload": {"session_id": "...", "session_token": "..."}}`). Session tokens are never appended to URL query parameters where they could leak into reverse-proxy access logs or browser history.
    - Clients cannot hijack another connection's session or overwrite its active WebSocket reference by supplying an arbitrary `session_id`.
    - Disconnect cleanup validates socket ownership before releasing resources, ensuring one connection's disconnect cannot terminate or disrupt another client's session.
-   - Short-term conversation context is strictly partitioned per session in memory and in SQLite (`session_id` column).
+   - **Partitioned Preferences, Notes & Memory**: User preferences (`kv_memory`), quick notes, and short-term conversation context are strictly partitioned per session in SQLite with composite primary keys `(session_id, key)`. Context summaries and personalized facts recorded in Session Alpha are completely isolated from Session Beta.
 
 5. **Payload Size Limits & Strict Schema Validation**:
    - Maximum WebSocket frame size enforced at 1 MB (`MAX_PAYLOAD_BYTES`), protecting against memory exhaustion denial-of-service.
@@ -95,7 +97,7 @@ Cheeku enforces defensive defaults and strict input validation:
    - **Website Opening**: Strictly enforces `http://` and `https://` URL schemes with valid host domains. Rejects `file://`, `javascript:`, `data:`, and command injection characters.
    - **AppleScript Media & Volume**: Enforces action enum allowlists (`play`, `pause`, `playpause`, `next`, `previous`) and numeric volume clamping (0–100%) to prevent AppleScript injection.
 
-6. **Log Sanitization & Sensitive Data Protection**:
+7. **Log Sanitization & Sensitive Data Protection**:
    - Sensitive user tokens, raw conversation frames, and full memory values are excluded from logs.
    - External API error handling masks request credentials and avoids logging sensitive upstream payloads.
 
@@ -103,7 +105,7 @@ Cheeku enforces defensive defaults and strict input validation:
 
 ## ⚡ Concurrency & State Management
 
-- **Client Session Isolation**: Each connected WebSocket client is assigned an isolated session (`session_id`). Conversation turns, short-term history, in-flight coroutines, and state machine transitions do not collide between clients.
+- **Client Session Isolation**: Each connected WebSocket client is assigned an isolated session (`session_id`). Conversation turns, short-term history, in-flight coroutines, preferences, notes, and state machine transitions do not collide between clients.
 - **Voice Barge-In & Overlapping Turn Handling**: When a new speech transcript or user chat arrives while a turn is processing, the in-flight pipeline task (`_current_task`) is cancelled cleanly using `asyncio` cancellation primitives.
 - **Disconnect Cleanup**: When a WebSocket disconnects, all active in-flight tasks and timeout timers for that session are cancelled and awaited immediately to prevent orphaned coroutines or background resource leaks.
 - **Graceful Server Shutdown**: The application lifespan manager tracks all running background tasks (such as the telemetry broadcaster and active sessions), cancels them, and awaits completion during shutdown.
@@ -115,6 +117,7 @@ Cheeku enforces defensive defaults and strict input validation:
 ```text
 Cheeku/
 ├── run.py                     # Entry point (auto-venv switch & browser launcher)
+├── pytest.ini                 # Pytest test configuration & deprecation filters
 ├── backend/
 │   ├── app/
 │   │   ├── assistant.py       # Deterministic FSM, session orchestrators & barge-in
@@ -126,7 +129,7 @@ Cheeku/
 │   │   └── tts.py             # Multi-tier NeuralVoiceEngine cascade
 │   ├── brain/
 │   │   ├── groq.py            # Groq LPU client with OpenAI-compatible tool calling
-│   │   ├── memory.py          # SQLite WAL memory manager (KV facts & notes)
+│   │   ├── memory.py          # SQLite WAL memory manager (isolated per session)
 │   │   └── personality.py     # System prompt & conversational guardrails
 │   ├── models/
 │   │   └── schemas.py         # Pydantic domain models, WS schemas & inbound validators
@@ -134,7 +137,7 @@ Cheeku/
 │   │   ├── registry.py        # Tool registry, authorization gate & timeout wrapper
 │   │   ├── apps.py            # Validated app launcher & browser opener
 │   │   ├── media.py           # YouTube player & AppleScript media controls
-│   │   ├── notes.py           # Quick notes & user preference store
+│   │   ├── notes.py           # Quick notes & user preference store (session-scoped)
 │   │   ├── search.py          # Async DuckDuckGo web search
 │   │   └── system.py          # Hardware vitals & chronometer
 │   └── utils/
@@ -142,7 +145,7 @@ Cheeku/
 ├── frontend/
 │   ├── index.html             # HUD structure & 3D WebGL viewport
 │   ├── style.css              # Cyber-HUD themes & responsive layout
-│   └── app.js                 # Three.js GLSL shaders, Web Audio FFT & WS bridge
+│   └── app.js                 # Three.js GLSL shaders, in-band session resume & WS bridge
 └── tests/
     ├── conftest.py            # Root directory sys.path configuration
     ├── test_state_machine.py  # FSM transition validity & illegal jump unit tests
@@ -150,7 +153,7 @@ Cheeku/
     ├── test_auth_and_origins.py # Origin validation & token authentication tests
     ├── test_message_validation.py # Frame size limits & schema validation tests
     ├── test_tool_security.py  # Input sanitization, whitelist & injection tests
-    ├── test_session_isolation.py # Multi-client isolation & session state tests
+    ├── test_session_isolation.py # Multi-client isolation, session resumption & memory partition tests
     ├── test_concurrency_and_lifecycle.py # Overlapping turns & shutdown tests
     └── test_error_handling.py # External API timeouts, fallbacks & recovery tests
 ```
@@ -236,7 +239,7 @@ To connect manually with a configured or auto-generated token:
 
 ## 🧪 Automated Test Suite
 
-Cheeku includes a comprehensive automated test suite with **36 passing tests** across 8 test modules. All external APIs and OS subprocesses are safely mocked, and optional dependencies (`psutil`, `edge_tts`, `duckduckgo_search`) fail gracefully with built-in fallbacks.
+Cheeku includes a comprehensive automated test suite with **38 passing tests** across 8 test modules with **zero warnings**. All external APIs and OS subprocesses are safely mocked, and optional dependencies (`psutil`, `edge_tts`, `duckduckgo_search`) fail gracefully with built-in fallbacks.
 
 To run the complete test suite:
 
@@ -248,7 +251,7 @@ python3 -m pytest -q
 
 ### Test Coverage Summary:
 - `tests/test_auth_and_origins.py`: Validates allowed and disallowed origins, CSWSH prevention, token enforcement in query params and headers, auto-generated local tokens, and secure-by-default posture.
-- `tests/test_session_isolation.py`: Tests that concurrent WebSocket client connections maintain isolated short-term conversation histories in memory and SQLite, verifies cryptographic session token resumption, and asserts that unauthorized clients cannot hijack another connection's session or cause disconnect cleanup interference.
+- `tests/test_session_isolation.py`: Tests that concurrent WebSocket client connections maintain isolated short-term conversation histories in memory and SQLite, verifies in-band cryptographic session token resumption without query parameters, asserts per-session user preference and note isolation, and guarantees unauthorized clients cannot hijack another connection's session or cause disconnect cleanup interference.
 - `tests/test_message_validation.py`: Tests maximum frame payload limits, malformed JSON handling, unsupported message types, and schema validation.
 - `tests/test_tool_security.py`: Tests policy gates (`ENABLE_SYSTEM_ACTIONS=false` by default), application name allowlists, shell metacharacter rejection, URL scheme restrictions (`file://`, `javascript:` blocked), AppleScript injection guards, and volume clamping.
 - `tests/test_concurrency_and_lifecycle.py`: Tests barge-in cancellation on rapid overlapping turns, client disconnect task cleanup, and server shutdown awaiting.
@@ -258,15 +261,26 @@ python3 -m pytest -q
 
 ---
 
-## ⚠️ Deployment & Production Considerations
+## 🏗️ Production Hardening & Multi-User Architecture
 
-If deploying Cheeku beyond a local workstation prototype:
+Cheeku is currently optimized as a **single-user local desktop assistant prototype** featuring deep macOS host integration (AppleScript media control, local application launching, and local audio pipeline). Transitioning to a **multi-user production cloud service** requires several architectural adaptations:
 
+| Dimension | Single-User Prototype (Current) | Multi-User Cloud Service (Target Architecture) |
+|---|---|---|
+| **Identity & Authentication** | Shared static / auto-generated bearer token (`AUTH_TOKEN`) | OIDC / OAuth2 with per-user signed JWTs containing user claims (`sub`, `tenant_id`, `roles`) |
+| **Session Resumption** | Ephemeral in-memory `SessionRegistry` + SQLite token validation | Distributed Redis session store with TTL-backed secret hashes |
+| **URL & Token Hygiene** | In-band `session_resume` frame + `history.replaceState` | Secure HTTP-only cookies or short-lived WebSocket upgrade tickets (one-time nonce) |
+| **User Data Partitioning** | SQLite WAL with `(session_id, key)` composite primary key | PostgreSQL / CockroachDB with Row Level Security (RLS) or separate tenant schemas |
+| **Tool Execution & Sandboxing** | Local host OS subprocesses (`open -a`, AppleScript, local mic) | Sandboxed microVMs (Firecracker / gVisor) or containerized worker tasks with zero host access |
+| **Scalability & Clustering** | Single FastAPI process using in-memory `asyncio.Task` | Clustered FastAPI instances behind an Envoy/Nginx load balancer + Redis Pub/Sub backplane |
+| **Audio Synthesis (TTS)** | On-node cascade (Azure HD ➔ OpenAI ➔ Edge TTS ➔ macOS say) | Dedicated async audio microservice with client-side streaming or edge audio distribution |
+
+### Deployment Best Practices
 1. **TLS / WSS Termination**: Always place the server behind a reverse proxy (e.g. Nginx, Caddy, Cloudflare) that terminates TLS (`https://` and `wss://`). Never send tokens or audio data over unencrypted plain HTTP/WS outside loopback.
 2. **Reverse Proxy Configuration**: Ensure WebSocket upgrade headers (`Upgrade $http_upgrade; Connection "upgrade";`) and timeout parameters are configured on the reverse proxy.
 3. **Multi-User Authentication**: For multi-user environments, replace single-tenant `AUTH_TOKEN` with signed JWTs or session cookies tied to a user database.
 4. **Rate Limiting**: Implement network rate limiting on the reverse proxy or middleware to mitigate abuse of LLM and TTS upstream APIs.
-5. **Sandboxing in Cloud Environments**: System tools that manipulate host applications (`launch_application`, `control_media_player`) are intended for a local desktop assistant. When deploying to containerized or cloud environments, set `ENABLE_SYSTEM_ACTIONS=false` in `.env`.
+5. **Sandboxing in Cloud Environments**: System tools that manipulate host applications (`launch_application`, `control_media_player`) are intended for a local desktop assistant. When deploying to containerized or cloud environments, ensure `ENABLE_SYSTEM_ACTIONS=false` is enforced.
 
 ---
 

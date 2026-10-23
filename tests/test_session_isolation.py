@@ -160,3 +160,101 @@ def test_session_hijacking_prevention_and_disconnect_isolation():
         ) as (ws_resumed, resumed_id, _, was_resumed):
             assert resumed_id == session_alice_id
             assert was_resumed is True
+
+
+def test_preferences_and_notes_isolated_per_session():
+    """
+    Verifies that long-term facts, preferences, and notes stored in SQLite memory
+    are strictly partitioned by session and cannot leak across concurrent sessions.
+    """
+    session_alpha = "sess_alpha_test"
+    session_beta = "sess_beta_test"
+
+    # Set distinct preferences for both sessions
+    memory.set_pref("favorite_editor", "Neovim", session_id=session_alpha)
+    memory.set_pref("user_name", "Alice", session_id=session_alpha)
+
+    memory.set_pref("favorite_editor", "VS Code", session_id=session_beta)
+    memory.set_pref("user_name", "Bob", session_id=session_beta)
+
+    # Add distinct notes
+    memory.add_note("Alpha confidential project idea", session_id=session_alpha)
+    memory.add_note("Beta shopping list: apples, milk", session_id=session_beta)
+
+    # 1. Verify preferences are strictly partitioned
+    assert memory.get_pref("favorite_editor", session_id=session_alpha) == "Neovim"
+    assert memory.get_pref("user_name", session_id=session_alpha) == "Alice"
+
+    assert memory.get_pref("favorite_editor", session_id=session_beta) == "VS Code"
+    assert memory.get_pref("user_name", session_id=session_beta) == "Bob"
+
+    alpha_prefs = memory.get_all_prefs(session_id=session_alpha)
+    beta_prefs = memory.get_all_prefs(session_id=session_beta)
+    assert alpha_prefs["user_name"] == "Alice"
+    assert beta_prefs["user_name"] == "Bob"
+
+    # 2. Verify notes are strictly partitioned
+    alpha_notes = [n["content"] for n in memory.get_recent_notes(session_id=session_alpha)]
+    beta_notes = [n["content"] for n in memory.get_recent_notes(session_id=session_beta)]
+
+    assert any("Alpha confidential" in n for n in alpha_notes)
+    assert not any("Beta shopping" in n for n in alpha_notes)
+
+    assert any("Beta shopping" in n for n in beta_notes)
+    assert not any("Alpha confidential" in n for n in beta_notes)
+
+    # 3. Verify context summaries injected into system prompts are isolated
+    alpha_summary = memory.get_context_summary(session_id=session_alpha)
+    beta_summary = memory.get_context_summary(session_id=session_beta)
+    assert "Alice" in alpha_summary and "Bob" not in alpha_summary
+    assert "Bob" in beta_summary and "Alice" not in beta_summary
+
+
+def test_in_band_session_resumption_without_query_params():
+    """
+    Verifies production hardening: session resumption can be initiated in-band
+    over the established WebSocket connection, preventing secret session tokens
+    from ever appearing in URL query parameters, browser history, or server access logs.
+    """
+    with TestClient(app) as client:
+        # 1. Client connects with clean URL (zero session tokens in query parameters)
+        with client.websocket_connect(f"/ws?token={settings.AUTH_TOKEN}") as ws1:
+            ws1.receive_json()  # state_change
+            init_msg = ws1.receive_json()  # session_init command
+            ws1.receive_json()  # memory_update
+
+            session_id = init_msg["payload"]["session_id"]
+            session_token = init_msg["payload"]["session_token"]
+            assert session_id is not None
+            assert session_token is not None
+
+            # Set a preference inside this session
+            memory.set_pref("theme", "cyberpunk", session_id=session_id)
+
+        # 2. Client reconnects with clean URL (no session tokens in URL!)
+        with client.websocket_connect(f"/ws?token={settings.AUTH_TOKEN}") as ws2:
+            ws2.receive_json()  # state_change
+            initial_init = ws2.receive_json()  # new session_init
+            ws2.receive_json()  # initial memory_update
+            assert initial_init["payload"]["session_id"] != session_id
+
+            # 3. Client transmits session resumption credentials in-band
+            ws2.send_json({
+                "type": "session_resume",
+                "payload": {
+                    "session_id": session_id,
+                    "session_token": session_token
+                }
+            })
+
+            # Client receives confirmation of in-band resumption and restored memory
+            resume_init = ws2.receive_json()
+            assert resume_init["type"] == "command"
+            assert resume_init["payload"]["command"] == "session_init"
+            assert resume_init["payload"]["session_id"] == session_id
+            assert resume_init["payload"]["resumed"] is True
+
+            memory_update = ws2.receive_json()
+            assert memory_update["type"] == "memory_update"
+            assert memory_update["payload"]["preferences"].get("theme") == "cyberpunk"
+

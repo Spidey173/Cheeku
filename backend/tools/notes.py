@@ -25,7 +25,7 @@ SAFE_KEY_REGEX = re.compile(r"^[a-zA-Z0-9_\-]{1,50}$")
     },
     requires_system_action=False
 )
-def save_quick_note(content: str, category: str = "note") -> str:
+def save_quick_note(content: str, category: str = "note", session_id: str = "default") -> str:
     if not isinstance(content, str) or not content.strip():
         return "Error: Note content must be a non-empty string."
 
@@ -33,7 +33,7 @@ def save_quick_note(content: str, category: str = "note") -> str:
     clean_cat = str(category).strip()[:50] or "note"
     clean_cat = re.sub(r"[^a-zA-Z0-9_\-]", "", clean_cat) or "note"
 
-    note_id = memory.add_note(clean_content, clean_cat)
+    note_id = memory.add_note(clean_content, session_id=session_id, category=clean_cat)
     return f"I saved your note: '{clean_content}' (Note #{note_id})!"
 
 
@@ -56,7 +56,7 @@ def save_quick_note(content: str, category: str = "note") -> str:
     },
     requires_system_action=False
 )
-def remember_user_preference(key: str, value: str) -> str:
+def remember_user_preference(key: str, value: str, session_id: str = "default") -> str:
     if not isinstance(key, str) or not key.strip():
         return "Error: Preference key must be a non-empty string."
 
@@ -70,5 +70,5 @@ def remember_user_preference(key: str, value: str) -> str:
         val_str = value.strip()
 
     clean_val = val_str[:1000]
-    memory.set_pref(clean_key, clean_val)
+    memory.set_pref(clean_key, clean_val, session_id=session_id)
     return f"Got it! I will remember that your {clean_key.replace('_', ' ')} is '{clean_val}'! 💖"

@@ -52,7 +52,7 @@ class ToolRegistry:
             })
         return formatted
 
-    async def execute(self, name: str, args: Dict[str, Any]) -> Any:
+    async def execute(self, name: str, args: Dict[str, Any], session_id: str = "default") -> Any:
         func = self.get_tool(name)
         if not func:
             return f"Error: Tool '{name}' not found."
@@ -64,11 +64,16 @@ class ToolRegistry:
             return msg
 
         try:
-            logger.info(f"Executing tool '{name}' (keys: {list(args.keys())})")
+            call_args = dict(args)
+            sig = inspect.signature(func)
+            if "session_id" in sig.parameters and "session_id" not in call_args:
+                call_args["session_id"] = session_id
+
+            logger.info(f"[{session_id}] Executing tool '{name}' (keys: {list(call_args.keys())})")
             if inspect.iscoroutinefunction(func):
-                coro = func(**args)
+                coro = func(**call_args)
             else:
-                coro = asyncio.to_thread(func, **args)
+                coro = asyncio.to_thread(func, **call_args)
 
             result = await asyncio.wait_for(coro, timeout=settings.REQUEST_TIMEOUT_SECONDS)
             return result

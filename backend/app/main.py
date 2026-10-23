@@ -206,7 +206,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # 3. Establish connection
     await ws_manager.connect(websocket)
 
-    # 4. Bind to session orchestrator (cryptographically authenticated session)
+    # 4. Bind to session orchestrator (supports initial generation or legacy query params)
     req_session_id = websocket.query_params.get("session_id")
     req_session_token = websocket.query_params.get("session_token")
     session_id, session_token, session_orch, was_resumed = session_registry.get_or_resume(
@@ -235,7 +235,8 @@ async def websocket_endpoint(websocket: WebSocket):
             )
         )
 
-        prefs = memory.get_all_prefs()
+        # Send session-isolated preferences
+        prefs = memory.get_all_prefs(session_id=session_id)
         await ws_manager.send_to_socket(
             websocket,
             WSMessage(
@@ -271,6 +272,44 @@ async def websocket_endpoint(websocket: WebSocket):
 
             msg_type = inbound.type
             payload = inbound.payload
+
+            # In-band session resumption (avoids exposing session tokens in URL query params or access logs)
+            if msg_type in ["session_resume", "authenticate"]:
+                res_id = payload.get("session_id")
+                res_tok = payload.get("session_token")
+                user_id = payload.get("user_id")
+                if res_id and res_tok:
+                    new_id, new_tok, new_orch, resumed_ok = session_registry.get_or_resume(
+                        res_id, res_tok, websocket, user_id=user_id
+                    )
+                    if resumed_ok:
+                        session_id = new_id
+                        session_token = new_tok
+                        session_orch = new_orch
+                        logger.info(f"Session '{session_id}' successfully resumed in-band.")
+                        await ws_manager.send_to_socket(
+                            websocket,
+                            WSMessage(
+                                type=WSMessageType.COMMAND,
+                                payload={
+                                    "command": "session_init",
+                                    "session_id": session_id,
+                                    "session_token": session_token,
+                                    "resumed": True
+                                }
+                            )
+                        )
+                        prefs = memory.get_all_prefs(session_id=session_id)
+                        await ws_manager.send_to_socket(
+                            websocket,
+                            WSMessage(
+                                type=WSMessageType.MEMORY_UPDATE,
+                                payload={"preferences": prefs}
+                            )
+                        )
+                    else:
+                        logger.warning(f"In-band session resumption rejected for session '{res_id}'.")
+                continue
 
             if msg_type in ["chat", "transcript"]:
                 try:
@@ -308,6 +347,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"[{session_id}] Client requested immediate interrupt.")
                 await session_orch.interrupt("Client interrupt command")
                 await session_orch.set_state(AssistantState.READY, "Cheeku is ready!", force=True)
+
+            elif msg_type == "authenticate":
+                # Already authenticated; frame ignored gracefully
+                logger.debug(f"[{session_id}] Received redundant in-band authenticate message on active session.")
+                continue
 
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
