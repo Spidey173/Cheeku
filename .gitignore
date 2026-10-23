@@ -46,8 +46,13 @@ backend/logs/*.log
 .coverage
 htmlcov/
 
-# Local model weights & artifacts
+# Local model weights, databases & data artifacts
+backend/data/
 backend/data/models/
+
+# Vercel
+.vercel/
+*.vercel
 
 # OS specific
 .DS_Store
