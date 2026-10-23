@@ -4,10 +4,13 @@
 [![WebSockets](https://img.shields.io/badge/WebSockets-Full%20Duplex-orange.svg?style=flat-square&logo=websocket&logoColor=white)](https://websockets.readthedocs.io)
 [![Three.js](https://img.shields.io/badge/Three.js-WebGL%20Shaders-black.svg?style=flat-square&logo=three.js&logoColor=white)](https://threejs.org)
 [![Groq LPU](https://img.shields.io/badge/Groq%20LPU-Inference%20Engine-f55036.svg?style=flat-square)](https://groq.com)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-cheeku17.vercel.app-00dfa2.svg?style=flat-square&logo=vercel&logoColor=white)](https://cheeku17.vercel.app/)
 [![Architecture](https://img.shields.io/badge/Architecture-Event--Driven%20FSM-purple.svg?style=flat-square)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
 **Cheeku AI** is an event-driven personal voice assistant prototype. It combines a **headless asynchronous FastAPI backend** with a **browser-hosted Three.js 3D WebGL HUD**, offering low-latency voice interaction, deterministic state management, isolated client sessions, and sandboxed system tools.
+
+> 🚀 **Live Interactive Web Demo**: Try Cheeku AI directly in your browser without local setup: **[https://cheeku17.vercel.app/](https://cheeku17.vercel.app/)** (features 3D WebGL shader core, live speech recognition, and autonomous tool calling).
 
 > ℹ️ **Prototype Status & Platform Guidance**:
 > Cheeku is designed as an advanced personal assistant prototype for local development and experimentation. Host OS integrations (desktop application launching, AppleScript media player control, and master audio volume adjustment) are macOS-specific and fail gracefully on Linux and Windows. Core chat reasoning, real-time web search, SQLite notes, and browser-based audio playback operate cross-platform.
@@ -117,7 +120,13 @@ Cheeku enforces defensive defaults and strict input validation:
 ```text
 Cheeku/
 ├── run.py                     # Entry point (auto-venv switch & browser launcher)
+├── run.sh                     # Executable launch script
 ├── pytest.ini                 # Pytest test configuration & deprecation filters
+├── demo/                      # Standalone zero-server Vercel web demo (cheeku17.vercel.app)
+│   ├── index.html             # Demo HUD & Three.js WebGL canvas
+│   ├── style.css              # Cyber-HUD responsive styling
+│   ├── app.js                 # Standalone client engine (Web Speech & autonomous brain)
+│   └── vercel.json            # Vercel deployment configuration
 ├── backend/
 │   ├── app/
 │   │   ├── assistant.py       # Deterministic FSM, session orchestrators & barge-in
@@ -157,6 +166,23 @@ Cheeku/
     ├── test_concurrency_and_lifecycle.py # Overlapping turns & shutdown tests
     └── test_error_handling.py # External API timeouts, fallbacks & recovery tests
 ```
+
+---
+
+## 🌐 Live Web Demo on Vercel
+
+Test Cheeku AI instantly in your browser without local dependencies or Python setup:
+
+👉 **[https://cheeku17.vercel.app/](https://cheeku17.vercel.app/)**
+
+### Demo Highlights
+- **Zero-Backend Cloud Execution**: Completely runs in the client browser with no local server required.
+- **Three.js WebGL Simplex Core**: Living liquid plasma sphere deforming organically to audio levels, accompanied by an acoustic wave ribbon.
+- **Voice Recognition & Speech**: Web Speech API integration with real-time VisionOS-inspired live transcription pill and spoken audio responses.
+- **Dual-Mode Autonomous Brain**:
+  - **Built-in Brain (Default)**: High-speed conversational reasoning that simulates system vitals diagnostics, YouTube music streaming, quick note taking, witty jokes, and capabilities.
+  - **Live Groq Cloud (Optional)**: Open the ⚙️ **Settings** drawer to connect your Groq Cloud API key for live unconstrained LLM generation.
+- **Interactive Prompt Chips**: Quick-tap action chips for effortless exploration on mobile, tablet, and desktop devices.
 
 ---
 
