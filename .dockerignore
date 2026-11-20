@@ -1,0 +1,37 @@
+# Git and IDE metadata
+.git/
+.github/
+.vscode/
+.idea/
+.DS_Store
+
+# Python virtual environments & bytecode
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Testing & Coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases, tokens, logs & secrets
+*.db
+*.sqlite3
+backend/data/*.db
+backend/logs/*.log
+logs/
+.env
+.env.local
+*.env
+.cheeku_token
+backend/.cheeku_token
+vitals_report.txt
+
+# Standalone demo
+demo/
+

@@ -1,0 +1,56 @@
+services:
+  cheeku:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cheeku-voice-os
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=false
+      - ENABLE_SYSTEM_ACTIONS=false
+      - ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://0.0.0.0:8000
+      # Groq Cloud LLM API credentials (can be set in .env or system environment)
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL=${GROQ_MODEL:-qwen/qwen3.8-27b}
+      # Security Token (leave empty for auto-generated session token, or set your custom token)
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      - WS_AUTH_REQUIRED=${WS_AUTH_REQUIRED:-true}
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - cheeku-data:/app/backend/data
+      - cheeku-logs:/app/backend/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Dedicated container test service: run with `docker compose run --rm cheeku-test`
+  cheeku-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cheeku-voice-os-test
+    profiles:
+      - test
+    environment:
+      - HOST=127.0.0.1
+      - PORT=8000
+      - ENABLE_SYSTEM_ACTIONS=false
+      - AUTH_TOKEN=ci-test-token
+      - WS_AUTH_REQUIRED=true
+    command: ["pytest", "-v"]
+
+volumes:
+  cheeku-data:
+    name: cheeku-data
+  cheeku-logs:
+    name: cheeku-logs
+

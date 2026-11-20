@@ -119,6 +119,13 @@ Cheeku enforces defensive defaults and strict input validation:
 
 ```text
 Cheeku/
+├── Dockerfile                 # Production & developer multi-stage Docker container
+├── docker-compose.yml         # Container compose stack with persistent storage & test runner
+├── .dockerignore              # Docker build context exclusions
+├── Makefile                   # Unified developer automation commands (setup, dev, test, docker)
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # GitHub Actions CI matrix tests & container healthcheck
 ├── run.py                     # Entry point (auto-venv switch & browser launcher)
 ├── run.sh                     # Executable launch script
 ├── pytest.ini                 # Pytest test configuration & deprecation filters
@@ -189,18 +196,47 @@ Test Cheeku AI instantly in your browser without local dependencies or Python se
 ## 🛠️ Quickstart
 
 ### Prerequisites
-- **Python**: 3.10 to 3.14
-- **Operating System**: macOS recommended for full desktop features; Linux and Windows supported for chat, search, notes, and browser audio.
+- **Docker** (recommended for zero-setup execution) **OR** **Python 3.10–3.14**
 - **Web Browser**: Chrome, Safari, Edge, or Brave with Web Audio API support.
-- **API Key**: Free Groq Cloud API key from [groq.com](https://groq.com) (for LLM reasoning).
+- **API Key**: Free Groq Cloud API key from [groq.com](https://groq.com) (for conversational LLM reasoning).
 
-### 1. Installation
+---
+
+### Option A: Docker (Zero Developer Setup — Recommended)
+
+Run the full Cheeku voice engine and interactive HUD inside a secure container with zero local environment setup:
 
 ```bash
-# Clone repository
+# 1. Clone repository
 git clone https://github.com/your-username/cheeku.git
 cd Cheeku
 
+# 2. Configure environment (optional, or pass GROQ_API_KEY)
+cp .env.example .env
+
+# 3. Spin up containerized stack
+docker compose up --build
+```
+
+Cheeku will be live and serving at **`http://localhost:8000`** with automated persistent storage for memory and logs.
+
+To run the automated test suite inside Docker:
+```bash
+docker compose run --rm cheeku-test
+```
+
+---
+
+### Option B: Local Python Setup (or via Makefile)
+
+#### 1. Quick Setup via Makefile
+```bash
+make setup      # Creates venv and installs all dependencies
+make dev        # Starts Cheeku with auto-reload and opens your browser
+```
+
+#### 2. Manual Installation
+```bash
 # Create and activate virtual environment
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -209,7 +245,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+#### 3. Configure Environment
 
 Copy `.env.example` to `.env`:
 
@@ -250,16 +286,80 @@ TTS_RATE=+0%
 TTS_PITCH=+0Hz
 ```
 
-### 3. Start the Server
+#### 4. Start the Server
 
 ```bash
 python run.py
+# or
+./run.sh
 ```
 
 The server binds to `http://127.0.0.1:8000` and automatically launches your default browser with the session token attached.
 
 To connect manually with a configured or auto-generated token:
 👉 `http://127.0.0.1:8000/?token=your_auth_token`
+
+---
+
+## 🐳 Docker & Containerization
+
+Cheeku provides a hardened, multi-stage, production-ready `Dockerfile` and `docker-compose.yml` to remove manual developer configuration:
+
+- **Lean Base Image**: Built on `python:3.11-slim` with layer caching for rapid rebuilds.
+- **Defensive Non-Root User**: Runs under a dedicated `cheeku` user (UID 1000) adhering to least-privilege principles.
+- **Built-in Health Checks**: Docker healthcheck monitors `GET /health` to ensure server readiness (`curl -f http://localhost:8000/health`).
+- **Persistent Data & Logs**: Docker volumes (`cheeku-data` and `cheeku-logs`) preserve SQLite memory states and execution logs across container restarts.
+- **Isolated Testing Profile**: Run `docker compose run --rm cheeku-test` to execute the full test suite in an identical container environment without host modifications.
+
+### Standalone Docker Commands
+
+```bash
+# Build Docker image
+docker build -t cheeku-voice-os .
+
+# Run container with custom Groq API key
+docker run -d \
+  -p 8000:8000 \
+  -e GROQ_API_KEY=your_key \
+  --name cheeku-instance \
+  cheeku-voice-os
+
+# View live container logs
+docker logs -f cheeku-instance
+
+# Run pytest inside the active container
+docker exec -it cheeku-instance pytest -v
+```
+
+---
+
+## 🔄 Continuous Integration & Quality Gates (CI)
+
+A robust GitHub Actions pipeline (`.github/workflows/ci.yml`) enforces automated quality gates on every `push` and `pull_request` to `main`:
+
+```
+┌────────────────────────────────────────────────────────┐
+│               GitHub Actions CI Pipeline               │
+└────────────────────────────────────────────────────────┘
+                           │
+       ┌───────────────────┴───────────────────┐
+       ▼                                       ▼
+┌──────────────────────────────┐     ┌──────────────────┐
+│ Matrix Unit & Security Tests │     │   Docker Build   │
+│  - Python 3.10               │     │  & Health Check  │
+│  - Python 3.11               │     │  - Buildx cache  │
+│  - Python 3.12               │     │  - /health ping  │
+│  - Python 3.13               │     │  - Container test│
+│  - flake8 lint & syntax gate │     └──────────────────┘
+│  - 38 automated test cases   │
+└──────────────────────────────┘
+```
+
+1. **Python Matrix Testing**: Executes the full 38-test suite across Python 3.10, 3.11, 3.12, and 3.13 with pip caching.
+2. **Static Code Analysis**: Runs `flake8` to catch syntax errors (`E9`), undefined names (`F63`, `F7`, `F82`), and code complexity violations before merging.
+3. **Container Build Verification**: Builds the Docker container with GitHub Actions caching (`docker/build-push-action`).
+4. **Live Container Healthcheck**: Boots the containerized server in the runner, asserts HTTP 200 OK on `/health`, and executes the test suite directly within the live container.
+5. **Concurrency Control**: Automatically cancels stale in-flight CI runs when newer commits are pushed to the same branch.
 
 ---
 
@@ -270,8 +370,13 @@ Cheeku includes a comprehensive automated test suite with **38 passing tests** a
 To run the complete test suite:
 
 ```bash
-python3 -m pytest -q
-# or
+# Via Makefile:
+make test
+
+# In Docker (zero host setup):
+docker compose run --rm cheeku-test
+
+# Or directly via Python virtual environment:
 ./venv/bin/pytest -v
 ```
 
