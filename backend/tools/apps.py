@@ -27,15 +27,15 @@ SAFE_APP_NAME_PATTERN = re.compile(r"^[A-Za-z0-9\.\- ]{1,100}$")
     requires_system_action=True
 )
 async def launch_application(app_name: str) -> str:
-    if sys.platform != "darwin":
-        return "Error: Launching desktop applications is only supported on macOS."
-
     if not isinstance(app_name, str):
         return "Error: Application name must be a string."
 
     clean_name = app_name.strip()
     if not clean_name or not SAFE_APP_NAME_PATTERN.match(clean_name) or clean_name.startswith("-"):
         return f"Error: Invalid application name '{app_name}'. Application names must be alphanumeric and cannot contain path separators or flags."
+
+    if sys.platform != "darwin":
+        return "Error: Launching desktop applications is only supported on macOS."
 
     # Whitelist enforcement
     allowed_map = {app.lower(): app for app in settings.ALLOWED_SYSTEM_APPS}

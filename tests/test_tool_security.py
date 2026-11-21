@@ -25,8 +25,9 @@ def test_system_action_authorization_disabled(monkeypatch):
     asyncio.run(_test())
 
 
-def test_launch_application_input_validation():
+def test_launch_application_input_validation(monkeypatch):
     async def _test():
+        monkeypatch.setattr(sys, "platform", "darwin")
         # Shell metacharacter injection attempt
         res = await launch_application("Safari; rm -rf /")
         assert "Invalid application name" in res
@@ -114,12 +115,13 @@ def test_open_website_valid_url(monkeypatch):
     asyncio.run(_test())
 
 
-def test_control_media_player_security():
+def test_control_media_player_security(monkeypatch):
     async def _test():
         # Attempt AppleScript command injection
         res_inject = await control_media_player('play" \n do shell script "touch /tmp/pwned')
         assert "Unsupported media action" in res_inject
 
+        monkeypatch.setattr(sys, "platform", "darwin")
         # Valid action
         with patch("backend.tools.media.run_applescript_async", new_callable=AsyncMock) as mock_as:
             mock_as.return_value = "ok"
@@ -129,12 +131,13 @@ def test_control_media_player_security():
     asyncio.run(_test())
 
 
-def test_set_system_volume_validation():
+def test_set_system_volume_validation(monkeypatch):
     async def _test():
         # Non-integer
         res_invalid = await set_system_volume("not_a_number")
         assert "must be an integer" in res_invalid
 
+        monkeypatch.setattr(sys, "platform", "darwin")
         # Clamping behavior
         with patch("backend.tools.media.run_applescript_async", new_callable=AsyncMock) as mock_as:
             mock_as.return_value = ""
@@ -147,12 +150,13 @@ def test_set_system_volume_validation():
     asyncio.run(_test())
 
 
-def test_play_youtube_video_sanitization():
+def test_play_youtube_video_sanitization(monkeypatch):
     async def _test():
         # Empty query
         res = await play_youtube_video("")
         assert "must be a non-empty string" in res
 
+        monkeypatch.setattr(sys, "platform", "darwin")
         # Mock successful yt-dlp resolution
         mock_proc = AsyncMock()
         mock_proc.returncode = 0
@@ -161,7 +165,8 @@ def test_play_youtube_video_sanitization():
         mock_open_proc = AsyncMock()
         mock_open_proc.wait.return_value = 0
 
-        with patch("asyncio.create_subprocess_exec", side_effect=[mock_proc, mock_open_proc]):
+        with patch("asyncio.create_subprocess_exec", side_effect=[mock_proc, mock_open_proc]), \
+             patch("webbrowser.open", return_value=True):
             res = await play_youtube_video("Rick Astley")
             assert "Playing Best Song Ever on YouTube" in res
 

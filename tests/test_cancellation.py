@@ -7,6 +7,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+from unittest.mock import AsyncMock, patch
 from backend.models.schemas import AssistantState
 from backend.app.assistant import AssistantOrchestrator
 
@@ -92,10 +93,12 @@ async def run_cancellation_tests():
     await asyncio.sleep(0.02)
 
     # Now new user input arrives
-    await orchestrator.handle_user_input("New speech from user")
-    # Even if handle_user_input executes against real brain, let's verify interrupt mechanism:
-    await orchestrator.interrupt("Simulated user turn switch")
-    assert orchestrator.is_processing is False
+    with patch("backend.brain.groq.groq_client.generate_response", new_callable=AsyncMock) as mock_groq:
+        mock_groq.return_value = {"content": "ok", "tool_calls": [], "success": True}
+        await orchestrator.handle_user_input("New speech from user")
+        # Even if handle_user_input executes against real brain, let's verify interrupt mechanism:
+        await orchestrator.interrupt("Simulated user turn switch")
+        assert orchestrator.is_processing is False
 
     print("✅ Test 3: Re-entrant turn handling and interrupt isolation verified.")
 

@@ -131,12 +131,12 @@ async def play_youtube_video(query: str) -> str:
     requires_system_action=True
 )
 async def control_media_player(action: str) -> str:
-    if sys.platform != "darwin":
-        return "Media player control is only supported on macOS."
-
     clean_action = str(action).strip().lower()
     if clean_action not in ALLOWED_MEDIA_ACTIONS:
         return f"Error: Unsupported media action '{action}'. Allowed: {', '.join(sorted(ALLOWED_MEDIA_ACTIONS))}."
+
+    if sys.platform != "darwin":
+        return "Media player control is only supported on macOS."
 
     # First attempt Spotify
     spotify_script = f'tell application "Spotify" to {clean_action}'
@@ -171,13 +171,13 @@ async def control_media_player(action: str) -> str:
     requires_system_action=True
 )
 async def set_system_volume(volume_percent: int) -> str:
-    if sys.platform != "darwin":
-        return "Volume adjustment is only supported on macOS."
-
     try:
         val = int(volume_percent)
     except (ValueError, TypeError):
         return "Error: volume_percent must be an integer."
+
+    if sys.platform != "darwin":
+        return "Volume adjustment is only supported on macOS."
 
     clamped = max(0, min(100, val))
     script = f"set volume output volume {clamped}"

@@ -37,9 +37,11 @@ def test_session_overlapping_requests_barge_in():
         assert orch.is_processing is True
 
         # Now incoming second turn triggers barge-in
-        await orch.handle_user_input("Second user turn")
-        assert task_1_cancelled is True
-        assert orch.is_processing is False
+        with patch("backend.brain.groq.groq_client.generate_response", new_callable=AsyncMock) as mock_groq:
+            mock_groq.return_value = {"content": "ok", "tool_calls": [], "success": True}
+            await orch.handle_user_input("Second user turn")
+            assert task_1_cancelled is True
+            assert orch.is_processing is False
 
     asyncio.run(_test())
 
